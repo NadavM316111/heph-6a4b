@@ -277,6 +277,7 @@ export default function Home() {
   };
 
   const startRecording = async () => {
+    if (typeof window === 'undefined') return;
     if (isRecording) return;
     let stream: MediaStream;
     try {

@@ -75,6 +75,7 @@ export default function Home() {
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const speechRecRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [supported, setSupported] = useState(true);
   const [ndaModal, setNdaModal] = useState(false);
   const [ndaConvId, setNdaConvId] = useState<number | null>(null);
   const [ndaChecked, setNdaChecked] = useState(false);

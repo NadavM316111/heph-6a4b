@@ -301,7 +301,7 @@ export default function Home() {
       recognition.interimResults = true;
       recognition.lang = "en-US";
       let finalText = "";
-      recognition.onresult = (ev: any): void => {
+      recognition.onresult = (ev: any) => {
         let interim = "";
         for (let i = ev.resultIndex; i < ev.results.length; i++) {
           const r = ev.results[i];

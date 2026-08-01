@@ -69,7 +69,7 @@ export default function Home() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const speechRecRef = useRef<InstanceType<typeof window.SpeechRecognition> | null>(null);
+  const speechRecRef = useRef<SpeechRecognition | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [ndaModal, setNdaModal] = useState(false);
   const [ndaConvId, setNdaConvId] = useState<number | null>(null);

@@ -1284,10 +1284,10 @@ const styles: Record<string, React.CSSProperties> = {
   toggleBtnOn: { background: "#e63946", color: "#fff" },
   toggleBtnOff: { background: "#2e3147", color: "#888" },
   toggleBtnReview: { background: "#6c63ff", color: "#fff", fontSize: 11 },
-  toggleBtnPending: { background: "#2a2a1a", color: "#888", fontSize: 11, cursor: "not-allowed" as const },
+  toggleBtnPending: { background: "#2a2a1a", color: "#888", fontSize: 11, cursor: "not-allowed" },
   inviteBox: {
     background: "#1a2a1a", border: "1px solid #2a4a2a", borderRadius: 10,
-    padding: "16px 18px", display: "flex", flexDirection: "column" as const, gap: 8,
+    padding: "16px 18px", display: "flex", flexDirection: "column", gap: 8,
   },
   inviteTitle: { color: "#7ec87e", fontSize: 15, fontWeight: 700, margin: 0 },
   inviteSub: { color: "#aaa", fontSize: 13, margin: 0 },
@@ -1297,13 +1297,13 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #2e3147",
   },
   inviteLinkText: {
-    flex: 1, color: "#6c63ff", fontSize: 12, wordBreak: "break-all" as const,
+    flex: 1, color: "#6c63ff", fontSize: 12, wordBreak: "break-all",
     fontFamily: "monospace",
   },
   btnCopy: {
     padding: "5px 12px", background: "#6c63ff", color: "#fff",
     border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600,
-    cursor: "pointer", whiteSpace: "nowrap" as const, flexShrink: 0,
+    cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
   },
   inviteNote: { color: "#666", fontSize: 12, margin: 0 },
   ndaBanner: {
@@ -1346,16 +1346,16 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "0 6px", color: "#888", flexShrink: 0, lineHeight: 1,
   },
   iconBtnRecording: { color: "#e63946" },
-  attachmentContent: { display: "flex", flexDirection: "column" as const, gap: 4 },
+  attachmentContent: { display: "flex", flexDirection: "column", gap: 4 },
   attachmentImage: {
     maxWidth: 220, maxHeight: 200, borderRadius: 10, cursor: "pointer",
-    objectFit: "cover" as const, display: "block",
+    objectFit: "cover", display: "block",
   },
   attachmentLink: {
     color: "#a0c4ff", fontSize: 13, textDecoration: "none",
     background: "rgba(0,0,0,0.2)", padding: "6px 10px", borderRadius: 8, display: "inline-block",
   },
-  voiceContent: { display: "flex", flexDirection: "column" as const, gap: 6, minWidth: 180 },
+  voiceContent: { display: "flex", flexDirection: "column", gap: 6, minWidth: 180 },
   voiceIcon: { fontSize: 16 },
   audioPlayer: { width: "100%", minWidth: 180, maxWidth: 260 },
   transcriptText: {
@@ -1365,14 +1365,14 @@ const styles: Record<string, React.CSSProperties> = {
   recordingBar: {
     display: "flex", alignItems: "center", gap: 10,
     padding: "8px 16px", background: "#2d1515", borderTop: "1px solid #4d2020",
-    flexWrap: "wrap" as const,
+    flexWrap: "wrap",
   },
   recordingDot: {
     width: 10, height: 10, borderRadius: "50%", background: "#e63946",
     flexShrink: 0, animation: "pulse 1s ease-in-out infinite",
   },
   recordingTimer: { color: "#ff9999", fontSize: 13, fontVariantNumeric: "tabular-nums", fontWeight: 600, flexShrink: 0 },
-  recordingTranscript: { flex: 1, color: "#ccc", fontSize: 12, fontStyle: "italic", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const },
+  recordingTranscript: { flex: 1, color: "#ccc", fontSize: 12, fontStyle: "italic", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
   stopRecordingBtn: {
     padding: "5px 12px", background: "#e63946", color: "#fff",
     border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600,
@@ -1385,23 +1385,23 @@ const styles: Record<string, React.CSSProperties> = {
   ndaActionBanner: {
     background: "#1a1a2e", color: "#99aaff", padding: "10px 20px",
     fontSize: 13, borderBottom: "1px solid #2a2a5a",
-    display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" as const,
+    display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap",
   },
   btnAcceptNda: {
     padding: "7px 16px", background: "#6c63ff", color: "#fff",
     border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600,
-    cursor: "pointer", whiteSpace: "nowrap" as const, flexShrink: 0,
+    cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0,
   },
   modalOverlay: {
     position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)",
     display: "flex", alignItems: "center", justifyContent: "center",
-    zIndex: 1000, padding: 16, overflowY: "auto" as const,
+    zIndex: 1000, padding: 16, overflowY: "auto",
   },
   modalBox: {
     background: "#1a1d27", borderRadius: 16, padding: "20px 16px",
     width: "100%", maxWidth: 620, boxShadow: "0 8px 40px rgba(0,0,0,0.7)",
     display: "flex", flexDirection: "column", gap: 14,
-    maxHeight: "90vh", overflowY: "auto" as const,
+    maxHeight: "90vh", overflowY: "auto",
     margin: "auto",
   },
   modalTitle: { color: "#fff", fontSize: 20, margin: 0, fontWeight: 700 },
@@ -1412,7 +1412,7 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid #2e3147",
   },
   ndaMetaRow: { display: "flex", gap: 12, alignItems: "baseline" },
-  ndaMetaLabel: { color: "#666", fontSize: 11, fontWeight: 600, textTransform: "uppercase" as const, minWidth: 110 },
+  ndaMetaLabel: { color: "#666", fontSize: 11, fontWeight: 600, textTransform: "uppercase", minWidth: 110 },
   ndaMetaValue: { color: "#ccc", fontSize: 13 },
   ndaScroll: {
     background: "#12151e", borderRadius: 8, padding: "14px 18px",
@@ -1436,7 +1436,7 @@ const styles: Record<string, React.CSSProperties> = {
   signatureInput: {
     padding: "10px 14px", borderRadius: 8, border: "1px solid #2e3147",
     background: "#0f1117", color: "#fff", fontSize: 15, outline: "none",
-    width: "100%", boxSizing: "border-box" as const,
+    width: "100%", boxSizing: "border-box",
   },
   signaturePreview: {
     fontFamily: "Georgia, serif", fontSize: 22, color: "#6c63ff",
@@ -1444,6 +1444,6 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: 36, letterSpacing: "0.5px",
   },
   ndaErrorText: { color: "#ff6b6b", fontSize: 13, margin: 0 },
-  ndaFootnote: { color: "#555", fontSize: 12, margin: 0, textAlign: "center" as const, lineHeight: 1.5 },
-  modalActions: { display: "flex", gap: 12, justifyContent: "flex-end", flexWrap: "wrap" as const },
+  ndaFootnote: { color: "#555", fontSize: 12, margin: 0, textAlign: "center", lineHeight: 1.5 },
+  modalActions: { display: "flex", gap: 12, justifyContent: "flex-end", flexWrap: "wrap" },
 };

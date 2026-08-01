@@ -1106,14 +1106,18 @@ export default function Home() {
               >
                 📎
               </button>
-              <button
-                type="button"
-                style={{ ...styles.iconBtn, ...(isRecording ? styles.iconBtnRecording : {}) }}
-                onClick={isRecording ? stopRecording : startRecording}
-                title={isRecording ? "Stop recording" : "Record voice message"}
-              >
-                🎤
-              </button>
+              {supported ? (
+                <button
+                  type="button"
+                  style={{ ...styles.iconBtn, ...(isRecording ? styles.iconBtnRecording : {}) }}
+                  onClick={isRecording ? stopRecording : startRecording}
+                  title={isRecording ? "Stop recording" : "Record voice message"}
+                >
+                  🎤
+                </button>
+              ) : (
+                <p style={{ color: "#888", fontSize: 12, margin: 0 }}>Your browser does not support speech recognition.</p>
+              )}
               <input
                 style={styles.msgInput}
                 type="text"

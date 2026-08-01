@@ -88,6 +88,13 @@ export default function Home() {
     }
   }, []);
 
+  const [convSearch, setConvSearch] = useState("");
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState("");
+  const [chatSearchMatchIdx, setChatSearchMatchIdx] = useState(0);
+  const chatSearchInputRef = useRef<HTMLInputElement>(null);
+  const matchRefs = useRef<(HTMLDivElement | null)[]>([]);
+
   const [ndaModal, setNdaModal] = useState(false);
   const [ndaConvId, setNdaConvId] = useState<number | null>(null);
   const [ndaChecked, setNdaChecked] = useState(false);
@@ -216,7 +223,11 @@ export default function Home() {
     setConversations([]);
   };
 
+  // Reset in-chat search when switching conversations
   const openConversation = async (conv: Conversation) => {
+    setChatSearchOpen(false);
+    setChatSearchQuery("");
+    setChatSearchMatchIdx(0);
     setActiveConv(conv);
     setView("chat");
     lastMsgIdRef.current = 0;
@@ -521,6 +532,34 @@ export default function Home() {
     }
   };
 
+  // Filtered conversations for sidebar search
+  const filteredConversations = useMemo(() => {
+    const q = convSearch.trim().toLowerCase();
+    if (!q) return conversations;
+    return conversations.filter((c) => c.other_email.toLowerCase().includes(q));
+  }, [conversations, convSearch]);
+
+  // In-chat search: collect matching message ids
+  const chatMatchIds = useMemo(() => {
+    const q = chatSearchQuery.trim().toLowerCase();
+    if (!q) return [] as number[];
+    return messages
+      .filter((m) => {
+        const parsed = m.body.startsWith("{") ? (() => { try { return JSON.parse(m.body); } catch { return null; } })() : null;
+        const text = parsed ? (parsed.transcript ?? parsed.name ?? "") : m.body;
+        return text.toLowerCase().includes(q);
+      })
+      .map((m) => m.id);
+  }, [messages, chatSearchQuery]);
+
+  // Scroll to current match
+  useEffect(() => {
+    if (chatMatchIds.length === 0) return;
+    const safeIdx = ((chatSearchMatchIdx % chatMatchIds.length) + chatMatchIds.length) % chatMatchIds.length;
+    const el = matchRefs.current[chatMatchIds[safeIdx]];
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [chatMatchIds, chatSearchMatchIdx]);
+
   const myEmail = user?.email || "";
 
   // On mobile, derive which panel is visible
@@ -795,11 +834,26 @@ export default function Home() {
           <span style={styles.meEmail}>{myEmail}</span>
           <button style={styles.logoutBtn} onClick={handleLogout}>Log Out</button>
         </div>
-        <div style={styles.convList}>
-          {conversations.length === 0 && (
-            <p style={styles.emptyList}>No conversations yet.<br />Click ✏️ to start one.</p>
+        <div style={styles.convSearchWrap}>
+          <span style={styles.convSearchIcon}>🔍</span>
+          <input
+            style={styles.convSearchInput}
+            type="text"
+            placeholder="Search conversations…"
+            value={convSearch}
+            onChange={(e) => setConvSearch(e.target.value)}
+          />
+          {convSearch && (
+            <button style={styles.convSearchClear} onClick={() => setConvSearch("")}>×</button>
           )}
-          {conversations.map((conv) => (
+        </div>
+        <div style={styles.convList}>
+          {filteredConversations.length === 0 && (
+            <p style={styles.emptyList}>
+              {convSearch ? "No conversations match." : <>No conversations yet.<br />Click ✏️ to start one.</>}
+            </p>
+          )}
+          {filteredConversations.map((conv) => (
             <div
               key={conv.id}
               style={{
@@ -907,6 +961,19 @@ export default function Home() {
                   <span style={styles.confiBadgeSmall}>🔒 Confidential (NDA Active)</span>
                 )}
               </div>
+              {/* In-chat search toggle */}
+              <button
+                style={styles.chatSearchToggleBtn}
+                title="Search messages"
+                onClick={() => {
+                  const next = !chatSearchOpen;
+                  setChatSearchOpen(next);
+                  if (!next) { setChatSearchQuery(""); setChatSearchMatchIdx(0); }
+                  else setTimeout(() => chatSearchInputRef.current?.focus(), 60);
+                }}
+              >
+                🔍
+              </button>
               {(() => {
                 const isA = activeConv.participant_a_email === myEmail;
                 const iAccepted = isA ? activeConv.confidential_accepted_by_a : activeConv.confidential_accepted_by_b;
@@ -964,6 +1031,46 @@ export default function Home() {
                 );
               })()}
             </div>
+
+            {/* In-chat search bar */}
+            {chatSearchOpen && (
+              <div style={styles.chatSearchBar}>
+                <span style={styles.chatSearchBarIcon}>🔍</span>
+                <input
+                  ref={chatSearchInputRef}
+                  style={styles.chatSearchBarInput}
+                  type="text"
+                  placeholder="Search messages…"
+                  value={chatSearchQuery}
+                  onChange={(e) => { setChatSearchQuery(e.target.value); setChatSearchMatchIdx(0); }}
+                />
+                {chatMatchIds.length > 0 && (
+                  <span style={styles.chatSearchCount}>
+                    {((chatSearchMatchIdx % chatMatchIds.length) + chatMatchIds.length) % chatMatchIds.length + 1}/{chatMatchIds.length}
+                  </span>
+                )}
+                {chatSearchQuery && chatMatchIds.length === 0 && (
+                  <span style={styles.chatSearchNoMatch}>No matches</span>
+                )}
+                <button
+                  style={styles.chatSearchNavBtn}
+                  disabled={chatMatchIds.length === 0}
+                  onClick={() => setChatSearchMatchIdx((i) => i - 1)}
+                  title="Previous match"
+                >▲</button>
+                <button
+                  style={styles.chatSearchNavBtn}
+                  disabled={chatMatchIds.length === 0}
+                  onClick={() => setChatSearchMatchIdx((i) => i + 1)}
+                  title="Next match"
+                >▼</button>
+                <button
+                  style={styles.chatSearchCloseBtn}
+                  onClick={() => { setChatSearchOpen(false); setChatSearchQuery(""); setChatSearchMatchIdx(0); }}
+                  title="Close search"
+                >×</button>
+              </div>
+            )}
 
             {/* NDA notice banner — active */}
             {activeConv.confidential_mode && (
@@ -1026,12 +1133,35 @@ export default function Home() {
               {messages.map((msg) => {
                 const isMe = msg.sender_email === myEmail;
                 const parsed = parseMessageBody(msg.body);
+                const isMatch = chatMatchIds.includes(msg.id);
+                const safeMatchIdx = chatMatchIds.length > 0
+                  ? ((chatSearchMatchIdx % chatMatchIds.length) + chatMatchIds.length) % chatMatchIds.length
+                  : -1;
+                const isCurrent = isMatch && chatMatchIds[safeMatchIdx] === msg.id;
+
+                // Highlight helper for plain text bodies
+                const highlightText = (text: string): React.ReactNode => {
+                  const q = chatSearchQuery.trim().toLowerCase();
+                  if (!q || !isMatch) return text;
+                  const idx = text.toLowerCase().indexOf(q);
+                  if (idx === -1) return text;
+                  return (
+                    <>
+                      {text.slice(0, idx)}
+                      <mark style={styles.searchHighlight}>{text.slice(idx, idx + q.length)}</mark>
+                      {text.slice(idx + q.length)}
+                    </>
+                  );
+                };
+
                 return (
                   <div
                     key={msg.id}
+                    ref={(el) => { matchRefs.current[msg.id] = el; }}
                     style={{
                       ...styles.msgRow,
                       justifyContent: isMe ? "flex-end" : "flex-start",
+                      ...(isCurrent ? styles.msgRowCurrentMatch : isMatch ? styles.msgRowMatch : {}),
                     }}
                   >
                     <div
@@ -1062,11 +1192,11 @@ export default function Home() {
                           <span style={styles.voiceIcon}>🎤</span>
                           <audio controls src={parsed.url} style={styles.audioPlayer} />
                           {parsed.transcript && (
-                            <p style={styles.transcriptText}>&ldquo;{parsed.transcript}&rdquo;</p>
+                            <p style={styles.transcriptText}>&ldquo;{highlightText(parsed.transcript)}&rdquo;</p>
                           )}
                         </div>
                       ) : (
-                        <span style={styles.msgBody}>{msg.body}</span>
+                        <span style={styles.msgBody}>{highlightText(msg.body)}</span>
                       )}
                       <span style={styles.msgTimeRow}>
                         <span style={styles.msgTime}>
@@ -1419,6 +1549,54 @@ const styles: Record<string, React.CSSProperties> = {
     padding: "5px 12px", background: "#e63946", color: "#fff",
     border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600,
     cursor: "pointer", flexShrink: 0,
+  },
+  convSearchWrap: {
+    display: "flex", alignItems: "center", gap: 6,
+    padding: "8px 12px", borderBottom: "1px solid #2e3147",
+    background: "#1a1d27",
+  },
+  convSearchIcon: { fontSize: 14, color: "#555", flexShrink: 0 },
+  convSearchInput: {
+    flex: 1, background: "transparent", border: "none", outline: "none",
+    color: "#ccc", fontSize: 13, padding: "4px 0",
+  },
+  convSearchClear: {
+    background: "none", border: "none", color: "#555", fontSize: 18,
+    cursor: "pointer", lineHeight: 1, padding: "0 2px",
+  },
+  chatSearchToggleBtn: {
+    background: "none", border: "none", fontSize: 18, cursor: "pointer",
+    color: "#888", padding: "4px 6px", borderRadius: 8, lineHeight: 1, flexShrink: 0,
+  },
+  chatSearchBar: {
+    display: "flex", alignItems: "center", gap: 6,
+    padding: "8px 14px", background: "#12151e", borderBottom: "1px solid #2e3147",
+  },
+  chatSearchBarIcon: { fontSize: 14, color: "#555", flexShrink: 0 },
+  chatSearchBarInput: {
+    flex: 1, background: "transparent", border: "none", outline: "none",
+    color: "#ccc", fontSize: 14, padding: "4px 0",
+  },
+  chatSearchCount: {
+    color: "#888", fontSize: 12, whiteSpace: "nowrap", flexShrink: 0,
+  },
+  chatSearchNoMatch: {
+    color: "#ff6b6b", fontSize: 12, whiteSpace: "nowrap", flexShrink: 0,
+  },
+  chatSearchNavBtn: {
+    background: "#2e3147", border: "none", color: "#aaa",
+    width: 26, height: 26, borderRadius: 6, fontSize: 11,
+    cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  chatSearchCloseBtn: {
+    background: "none", border: "none", color: "#666",
+    fontSize: 20, cursor: "pointer", lineHeight: 1, padding: "0 2px", flexShrink: 0,
+  },
+  msgRowMatch: { background: "rgba(108,99,255,0.08)", borderRadius: 10 },
+  msgRowCurrentMatch: { background: "rgba(230,57,70,0.13)", borderRadius: 10 },
+  searchHighlight: {
+    background: "#e63946", color: "#fff", borderRadius: 3,
+    padding: "0 2px", fontStyle: "normal",
   },
   ndaPendingBanner: {
     background: "#1a2a1a", color: "#7ec87e", padding: "10px 20px",

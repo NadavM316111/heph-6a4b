@@ -206,9 +206,14 @@ export default function Home() {
     }
   };
 
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState<string | null>(null);
+
   const startNewConversation = async (e: React.FormEvent) => {
     e.preventDefault();
     setNewEmailError("");
+    setInviteLink(null);
+    setInviteEmail(null);
     const email = newEmail.trim().toLowerCase();
     if (!email) return;
     if (email === user?.email) {
@@ -224,6 +229,14 @@ export default function Home() {
     const d = await res.json();
     setLoading(false);
     if (!res.ok) {
+      // If the user doesn't exist on the platform, show an invite link
+      if (res.status === 404 || (d.error && (d.error.toLowerCase().includes("not found") || d.error.toLowerCase().includes("no user")))) {
+        const base = typeof window !== "undefined" ? window.location.origin : "";
+        const link = base + "/?invite=" + encodeURIComponent(email) + "&from=" + encodeURIComponent(user?.email ?? "");
+        setInviteLink(link);
+        setInviteEmail(email);
+        return;
+      }
       setNewEmailError(d.error || "Could not start conversation.");
       return;
     }
@@ -637,13 +650,34 @@ export default function Home() {
                 type="email"
                 placeholder="their@email.com"
                 value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
+                onChange={(e) => { setNewEmail(e.target.value); setInviteLink(null); setInviteEmail(null); }}
                 required
                 autoFocus
               />
               {newEmailError && <p style={styles.errorText}>{newEmailError}</p>}
+              {inviteLink && inviteEmail && (
+                <div style={styles.inviteBox}>
+                  <p style={styles.inviteTitle}>📨 {inviteEmail} isn&apos;t on ConfiMessage yet.</p>
+                  <p style={styles.inviteSub}>
+                    Share this invite link with them so they can sign up and you can start a confidential conversation:
+                  </p>
+                  <div style={styles.inviteLinkRow}>
+                    <span style={styles.inviteLinkText}>{inviteLink}</span>
+                    <button
+                      type="button"
+                      style={styles.btnCopy}
+                      onClick={() => { navigator.clipboard.writeText(inviteLink); }}
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <p style={styles.inviteNote}>
+                    Once they sign up with that email, come back here and start a conversation with them.
+                  </p>
+                </div>
+              )}
               <div style={{ display: "flex", gap: 10 }}>
-                <button style={styles.btnSecondary} type="button" onClick={() => setView("list")}>
+                <button style={styles.btnSecondary} type="button" onClick={() => { setView("list"); setInviteLink(null); setInviteEmail(null); }}>
                   Cancel
                 </button>
                 <button style={styles.btnPrimary} type="submit" disabled={loading}>
@@ -681,19 +715,62 @@ export default function Home() {
                   <span style={styles.confiBadgeSmall}>🔒 Confidential (NDA Active)</span>
                 )}
               </div>
-              <div style={styles.confidentialToggle}>
-                <span style={styles.toggleLabel}>Confidential</span>
-                <button
-                  style={{
-                    ...styles.toggleBtn,
-                    ...(activeConv.confidential_mode ? styles.toggleBtnOn : styles.toggleBtnOff),
-                  }}
-                  onClick={() => toggleConfidential(activeConv)}
-                  title={activeConv.confidential_mode ? "Disable confidential mode" : "Enable confidential mode (NDA)"}
-                >
-                  {activeConv.confidential_mode ? "ON" : "OFF"}
-                </button>
-              </div>
+              {(() => {
+                const isA = activeConv.participant_a_email === myEmail;
+                const iAccepted = isA ? activeConv.confidential_accepted_by_a : activeConv.confidential_accepted_by_b;
+                const theyAccepted = isA ? activeConv.confidential_accepted_by_b : activeConv.confidential_accepted_by_a;
+                // If they proposed (theyAccepted) and I haven't yet, show Review button instead of toggle
+                if (!activeConv.confidential_mode && !iAccepted && theyAccepted) {
+                  return (
+                    <div style={styles.confidentialToggle}>
+                      <span style={styles.toggleLabel}>Confidential</span>
+                      <button
+                        style={{ ...styles.toggleBtn, ...styles.toggleBtnReview }}
+                        onClick={() => {
+                          setNdaConvId(activeConv.id);
+                          setNdaChecked(false);
+                          setNdaSignedName("");
+                          setNdaError("");
+                          setNdaModal(true);
+                        }}
+                        title="Review and sign the NDA to enable confidential mode"
+                      >
+                        Review NDA
+                      </button>
+                    </div>
+                  );
+                }
+                // If I already accepted but they haven't, show pending state — toggle is locked
+                if (!activeConv.confidential_mode && iAccepted && !theyAccepted) {
+                  return (
+                    <div style={styles.confidentialToggle}>
+                      <span style={styles.toggleLabel}>Confidential</span>
+                      <button
+                        style={{ ...styles.toggleBtn, ...styles.toggleBtnPending }}
+                        disabled
+                        title="Waiting for the other party to sign the NDA"
+                      >
+                        Pending…
+                      </button>
+                    </div>
+                  );
+                }
+                return (
+                  <div style={styles.confidentialToggle}>
+                    <span style={styles.toggleLabel}>Confidential</span>
+                    <button
+                      style={{
+                        ...styles.toggleBtn,
+                        ...(activeConv.confidential_mode ? styles.toggleBtnOn : styles.toggleBtnOff),
+                      }}
+                      onClick={() => toggleConfidential(activeConv)}
+                      title={activeConv.confidential_mode ? "Disable confidential mode" : "Enable confidential mode (NDA requires both parties to sign)"}
+                    >
+                      {activeConv.confidential_mode ? "ON" : "OFF"}
+                    </button>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* NDA notice banner — active */}
@@ -717,8 +794,9 @@ export default function Home() {
               if (iAccepted && !theyAccepted) {
                 return (
                   <div style={styles.ndaPendingBanner}>
-                    ⏳ <strong>Waiting for {activeConv.other_email}</strong> to review and sign
-                    the NDA. Confidential Mode will activate once both parties have accepted.
+                    ⏳ <strong>You have signed the NDA.</strong> Waiting for{" "}
+                    <strong>{activeConv.other_email}</strong> to review and countersign.
+                    Confidential Mode activates only once <strong>both parties</strong> have accepted.
                   </div>
                 );
               }
@@ -726,8 +804,9 @@ export default function Home() {
                 return (
                   <div style={styles.ndaActionBanner}>
                     <span>
-                      ✍️ <strong>{activeConv.other_email}</strong> has signed the NDA and is
-                      requesting Confidential Mode for this conversation.
+                      ✍️ <strong>{activeConv.other_email}</strong> has proposed Confidential Mode
+                      and signed the NDA. <strong>Your signature is required</strong> before
+                      Confidential Mode activates — both parties must agree.
                     </span>
                     <button
                       style={styles.btnAcceptNda}
@@ -967,6 +1046,29 @@ const styles: Record<string, React.CSSProperties> = {
   },
   toggleBtnOn: { background: "#e63946", color: "#fff" },
   toggleBtnOff: { background: "#2e3147", color: "#888" },
+  toggleBtnReview: { background: "#6c63ff", color: "#fff", fontSize: 11 },
+  toggleBtnPending: { background: "#2a2a1a", color: "#888", fontSize: 11, cursor: "not-allowed" as const },
+  inviteBox: {
+    background: "#1a2a1a", border: "1px solid #2a4a2a", borderRadius: 10,
+    padding: "16px 18px", display: "flex", flexDirection: "column" as const, gap: 8,
+  },
+  inviteTitle: { color: "#7ec87e", fontSize: 15, fontWeight: 700, margin: 0 },
+  inviteSub: { color: "#aaa", fontSize: 13, margin: 0 },
+  inviteLinkRow: {
+    display: "flex", alignItems: "center", gap: 8,
+    background: "#12151e", borderRadius: 6, padding: "8px 10px",
+    border: "1px solid #2e3147",
+  },
+  inviteLinkText: {
+    flex: 1, color: "#6c63ff", fontSize: 12, wordBreak: "break-all" as const,
+    fontFamily: "monospace",
+  },
+  btnCopy: {
+    padding: "5px 12px", background: "#6c63ff", color: "#fff",
+    border: "none", borderRadius: 6, fontSize: 12, fontWeight: 600,
+    cursor: "pointer", whiteSpace: "nowrap" as const, flexShrink: 0,
+  },
+  inviteNote: { color: "#666", fontSize: 12, margin: 0 },
   ndaBanner: {
     background: "#2d1515", color: "#ff9999", padding: "10px 20px",
     fontSize: 13, borderBottom: "1px solid #4d2020",

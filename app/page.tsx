@@ -62,6 +62,15 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [notifAsked, setNotifAsked] = useState(false);
   const lastMsgIdRef = useRef<number>(0);
+  const [attachmentPreview, setAttachmentPreview] = useState<{ url: string; name: string; mime: string } | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [transcript, setTranscript] = useState("");
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const speechRecRef = useRef<InstanceType<typeof window.SpeechRecognition> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [ndaModal, setNdaModal] = useState(false);
   const [ndaConvId, setNdaConvId] = useState<number | null>(null);
   const [ndaChecked, setNdaChecked] = useState(false);
@@ -217,6 +226,125 @@ export default function Home() {
       await fetchMessages(activeConv.id, user?.email || "");
       await fetchConversations();
     }
+  };
+
+  const sendAttachmentMessage = async (body: string) => {
+    if (!activeConv) return;
+    const res = await fetch("/api/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversation_id: activeConv.id, body }),
+    });
+    if (res.ok) {
+      await fetchMessages(activeConv.id, user?.email || "");
+      await fetchConversations();
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeConv) return;
+    // Reset input so the same file can be re-selected
+    e.target.value = "";
+    const fd = new FormData();
+    fd.append("file", file);
+    const uploadRes = await fetch("/api/upload", { method: "POST", body: fd });
+    if (!uploadRes.ok) return;
+    const { url } = await uploadRes.json();
+    const payload = JSON.stringify({
+      __type: "attachment",
+      url,
+      name: file.name,
+      mime: file.type,
+    });
+    await sendAttachmentMessage(payload);
+  };
+
+  const startRecording = async () => {
+    if (isRecording) return;
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      alert("Microphone access denied.");
+      return;
+    }
+
+    audioChunksRef.current = [];
+    setTranscript("");
+    setRecordingSeconds(0);
+    setIsRecording(true);
+
+    // Web Speech API for live transcription
+    const SpeechRecognition =
+      (window as unknown as Record<string, unknown>).SpeechRecognition as typeof window.SpeechRecognition ||
+      (window as unknown as Record<string, unknown>).webkitSpeechRecognition as typeof window.SpeechRecognition;
+    if (SpeechRecognition) {
+      const rec = new SpeechRecognition();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = "en-US";
+      let finalText = "";
+      rec.onresult = (ev: SpeechRecognitionEvent) => {
+        let interim = "";
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const r = ev.results[i];
+          if (r.isFinal) finalText += r[0].transcript + " ";
+          else interim += r[0].transcript;
+        }
+        setTranscript((finalText + interim).trim());
+      };
+      rec.start();
+      speechRecRef.current = rec;
+    }
+
+    const recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (ev) => {
+      if (ev.data.size > 0) audioChunksRef.current.push(ev.data);
+    };
+    mediaRecorderRef.current = recorder;
+    recorder.start(200);
+
+    recordingTimerRef.current = setInterval(() => {
+      setRecordingSeconds((s) => s + 1);
+    }, 1000);
+  };
+
+  const stopRecording = async () => {
+    if (!isRecording || !mediaRecorderRef.current) return;
+    setIsRecording(false);
+    if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    speechRecRef.current?.stop();
+    speechRecRef.current = null;
+
+    await new Promise<void>((resolve) => {
+      const mr = mediaRecorderRef.current!;
+      mr.onstop = () => resolve();
+      mr.stop();
+      mr.stream.getTracks().forEach((t) => t.stop());
+    });
+
+    const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+    const fd = new FormData();
+    fd.append("file", audioBlob, "voice-" + Date.now() + ".webm");
+    const uploadRes = await fetch("/api/upload", { method: "POST", body: fd });
+    const finalTranscript = transcript;
+    setTranscript("");
+    setRecordingSeconds(0);
+    if (!uploadRes.ok) return;
+    const { url } = await uploadRes.json();
+    const payload = JSON.stringify({
+      __type: "voice",
+      url,
+      transcript: finalTranscript,
+    });
+    await sendAttachmentMessage(payload);
+  };
+
+  // Helper: parse special attachment/voice message bodies
+  const parseMessageBody = (body: string): { __type?: string; url?: string; name?: string; mime?: string; transcript?: string } | null => {
+    if (!body.startsWith("{")) return null;
+    try { return JSON.parse(body); } catch { return null; }
   };
 
   const [inviteLink, setInviteLink] = useState<string | null>(null);
@@ -617,6 +745,26 @@ export default function Home() {
 
   return (
     <div style={{ ...styles.appWrap, ...(isMobile ? { flexDirection: "column" } : {}) }}>
+      {/* Attachment lightbox */}
+      {attachmentPreview && (
+        <div style={styles.modalOverlay} onClick={() => setAttachmentPreview(null)}>
+          <div style={{ position: "relative", maxWidth: "90vw", maxHeight: "90vh" }} onClick={(e) => e.stopPropagation()}>
+            {attachmentPreview.mime.startsWith("image/") ? (
+              <img src={attachmentPreview.url} alt={attachmentPreview.name} style={{ maxWidth: "90vw", maxHeight: "85vh", borderRadius: 12, display: "block" }} />
+            ) : (
+              <a href={attachmentPreview.url} target="_blank" rel="noreferrer" style={{ color: "#6c63ff", fontSize: 18 }}>
+                Open {attachmentPreview.name}
+              </a>
+            )}
+            <button
+              onClick={() => setAttachmentPreview(null)}
+              style={{ position: "absolute", top: -16, right: -16, background: "#e63946", border: "none", color: "#fff", borderRadius: "50%", width: 32, height: 32, fontSize: 18, cursor: "pointer" }}
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
       {ndaModal && <NdaModal />}
       {/* Sidebar */}
       <div style={sidebarStyle}>
@@ -861,6 +1009,7 @@ export default function Home() {
               )}
               {messages.map((msg) => {
                 const isMe = msg.sender_email === myEmail;
+                const parsed = parseMessageBody(msg.body);
                 return (
                   <div
                     key={msg.id}
@@ -877,7 +1026,32 @@ export default function Home() {
                       }}
                     >
                       {msg.is_encrypted && <span style={styles.encryptedIcon}>🔒 </span>}
-                      <span style={styles.msgBody}>{msg.body}</span>
+                      {parsed?.__type === "attachment" ? (
+                        <div style={styles.attachmentContent}>
+                          {parsed.mime?.startsWith("image/") ? (
+                            <img
+                              src={parsed.url}
+                              alt={parsed.name ?? "image"}
+                              style={styles.attachmentImage}
+                              onClick={() => parsed.url && setAttachmentPreview({ url: parsed.url, name: parsed.name ?? "image", mime: parsed.mime ?? "image/jpeg" })}
+                            />
+                          ) : (
+                            <a href={parsed.url} target="_blank" rel="noreferrer" style={styles.attachmentLink}>
+                              📎 {parsed.name ?? "File"}
+                            </a>
+                          )}
+                        </div>
+                      ) : parsed?.__type === "voice" ? (
+                        <div style={styles.voiceContent}>
+                          <span style={styles.voiceIcon}>🎤</span>
+                          <audio controls src={parsed.url} style={styles.audioPlayer} />
+                          {parsed.transcript && (
+                            <p style={styles.transcriptText}>&ldquo;{parsed.transcript}&rdquo;</p>
+                          )}
+                        </div>
+                      ) : (
+                        <span style={styles.msgBody}>{msg.body}</span>
+                      )}
                       <span style={styles.msgTime}>
                         {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                       </span>
@@ -888,8 +1062,43 @@ export default function Home() {
               <div ref={messagesEndRef} />
             </div>
 
+            {/* Voice recording transcript preview */}
+            {isRecording && (
+              <div style={styles.recordingBar}>
+                <span style={styles.recordingDot} />
+                <span style={styles.recordingTimer}>{Math.floor(recordingSeconds / 60).toString().padStart(2, "0")}:{(recordingSeconds % 60).toString().padStart(2, "0")}</span>
+                <span style={styles.recordingTranscript}>{transcript || "Listening…"}</span>
+                <button style={styles.stopRecordingBtn} type="button" onClick={stopRecording}>
+                  ⏹ Stop &amp; Send
+                </button>
+              </div>
+            )}
+
             {/* Input */}
             <form onSubmit={sendMessage} style={styles.inputRow}>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,video/*,application/pdf,.doc,.docx,.txt"
+                style={{ display: "none" }}
+                onChange={handleFileChange}
+              />
+              <button
+                type="button"
+                style={styles.iconBtn}
+                onClick={() => fileInputRef.current?.click()}
+                title="Attach file or photo"
+              >
+                📎
+              </button>
+              <button
+                type="button"
+                style={{ ...styles.iconBtn, ...(isRecording ? styles.iconBtnRecording : {}) }}
+                onClick={isRecording ? stopRecording : startRecording}
+                title={isRecording ? "Stop recording" : "Record voice message"}
+              >
+                🎤
+              </button>
               <input
                 style={styles.msgInput}
                 type="text"
@@ -1134,6 +1343,43 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
   },
   sendBtnConfidential: { background: "#e63946" },
+  iconBtn: {
+    background: "none", border: "none", fontSize: 20, cursor: "pointer",
+    padding: "0 6px", color: "#888", flexShrink: 0, lineHeight: 1,
+  },
+  iconBtnRecording: { color: "#e63946" },
+  attachmentContent: { display: "flex", flexDirection: "column" as const, gap: 4 },
+  attachmentImage: {
+    maxWidth: 220, maxHeight: 200, borderRadius: 10, cursor: "pointer",
+    objectFit: "cover" as const, display: "block",
+  },
+  attachmentLink: {
+    color: "#a0c4ff", fontSize: 13, textDecoration: "none",
+    background: "rgba(0,0,0,0.2)", padding: "6px 10px", borderRadius: 8, display: "inline-block",
+  },
+  voiceContent: { display: "flex", flexDirection: "column" as const, gap: 6, minWidth: 180 },
+  voiceIcon: { fontSize: 16 },
+  audioPlayer: { width: "100%", minWidth: 180, maxWidth: 260, accentColor: "#6c63ff" },
+  transcriptText: {
+    margin: 0, fontSize: 12, color: "rgba(255,255,255,0.7)",
+    fontStyle: "italic", lineHeight: 1.4,
+  },
+  recordingBar: {
+    display: "flex", alignItems: "center", gap: 10,
+    padding: "8px 16px", background: "#2d1515", borderTop: "1px solid #4d2020",
+    flexWrap: "wrap" as const,
+  },
+  recordingDot: {
+    width: 10, height: 10, borderRadius: "50%", background: "#e63946",
+    flexShrink: 0, animation: "pulse 1s ease-in-out infinite",
+  },
+  recordingTimer: { color: "#ff9999", fontSize: 13, fontVariantNumeric: "tabular-nums", fontWeight: 600, flexShrink: 0 },
+  recordingTranscript: { flex: 1, color: "#ccc", fontSize: 12, fontStyle: "italic", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const },
+  stopRecordingBtn: {
+    padding: "5px 12px", background: "#e63946", color: "#fff",
+    border: "none", borderRadius: 8, fontSize: 12, fontWeight: 600,
+    cursor: "pointer", flexShrink: 0,
+  },
   ndaPendingBanner: {
     background: "#1a2a1a", color: "#7ec87e", padding: "10px 20px",
     fontSize: 13, borderBottom: "1px solid #2a4a2a",

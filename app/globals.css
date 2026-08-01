@@ -27,6 +27,10 @@ html, body {
   border-radius: 3px;
 }
 
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
 @keyframes spin {
   to { transform: rotate(360deg); }
 }

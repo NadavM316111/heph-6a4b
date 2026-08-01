@@ -76,6 +76,17 @@ export default function Home() {
   const speechRecRef = useRef<any>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [supported, setSupported] = useState(true);
+
+  useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      !("SpeechRecognition" in window) &&
+      !("webkitSpeechRecognition" in window)
+    ) {
+      setSupported(false);
+    }
+  }, []);
+
   const [ndaModal, setNdaModal] = useState(false);
   const [ndaConvId, setNdaConvId] = useState<number | null>(null);
   const [ndaChecked, setNdaChecked] = useState(false);

@@ -49,23 +49,61 @@ export async function GET(req: NextRequest) {
     [convId]
   );
 
-  // Mark as delivered for the current user (non-sender messages)
-  const undelivered = messages.filter((m: Record<string, unknown>) => m.sender_email !== email);
-  for (const msg of undelivered) {
+  // Mark as delivered AND read for the current user (non-sender messages)
+  const incomingMsgs = messages.filter((m: Record<string, unknown>) => m.sender_email !== email);
+  for (const msg of incomingMsgs) {
     const msgId = msg.id as number;
     const existing = await q(
-      `SELECT id FROM ` + P + `_message_receipts WHERE message_id = $1 AND recipient_email = $2`,
+      `SELECT id, delivered_at, read_at FROM ` + P + `_message_receipts WHERE message_id = $1 AND recipient_email = $2`,
       [msgId, email]
     );
     if (existing.length === 0) {
       await q(
-        `INSERT INTO ` + P + `_message_receipts (message_id, recipient_email, delivered_at) VALUES ($1, $2, now())`,
+        `INSERT INTO ` + P + `_message_receipts (message_id, recipient_email, delivered_at, read_at) VALUES ($1, $2, now(), now())`,
+        [msgId, email]
+      );
+    } else if (!existing[0].read_at) {
+      await q(
+        `UPDATE ` + P + `_message_receipts SET read_at = now() WHERE message_id = $1 AND recipient_email = $2`,
         [msgId, email]
       );
     }
   }
 
-  return NextResponse.json({ messages });
+  // For messages sent by the current user, attach receipt status from the other side
+  const sentMsgIds = messages
+    .filter((m: Record<string, unknown>) => m.sender_email === email)
+    .map((m: Record<string, unknown>) => m.id as number);
+
+  // Build a map of message_id -> { delivered_at, read_at } for sent messages
+  const receiptMap: Record<number, { delivered_at: string | null; read_at: string | null }> = {};
+  if (sentMsgIds.length > 0) {
+    const receipts = await q(
+      `SELECT message_id, delivered_at, read_at FROM ` + P + `_message_receipts WHERE message_id = ANY($1::int[]) AND recipient_email != $2`,
+      [sentMsgIds, email]
+    );
+    for (const r of receipts) {
+      receiptMap[r.message_id as number] = {
+        delivered_at: r.delivered_at as string | null,
+        read_at: r.read_at as string | null,
+      };
+    }
+  }
+
+  // Attach receipt_status to each message
+  // "sent" = no receipt row yet, "delivered" = delivered_at set, "read" = read_at set
+  const messagesWithStatus = messages.map((m: Record<string, unknown>) => {
+    if (m.sender_email !== email) {
+      return { ...m, receipt_status: "incoming" };
+    }
+    const receipt = receiptMap[m.id as number];
+    let receipt_status = "sent";
+    if (receipt?.read_at) receipt_status = "read";
+    else if (receipt?.delivered_at) receipt_status = "delivered";
+    return { ...m, receipt_status };
+  });
+
+  return NextResponse.json({ messages: messagesWithStatus });
 }
 
 export async function POST(req: NextRequest) {

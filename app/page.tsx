@@ -33,6 +33,7 @@ interface Message {
   is_encrypted: boolean;
   deleted_at: string | null;
   created_at: string;
+  receipt_status?: "sent" | "delivered" | "read" | "incoming";
 }
 
 type View = "list" | "chat" | "new";
@@ -1067,8 +1068,24 @@ export default function Home() {
                       ) : (
                         <span style={styles.msgBody}>{msg.body}</span>
                       )}
-                      <span style={styles.msgTime}>
-                        {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      <span style={styles.msgTimeRow}>
+                        <span style={styles.msgTime}>
+                          {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                        {isMe && (
+                          <span
+                            style={{
+                              ...styles.receiptIcon,
+                              ...(msg.receipt_status === "read" ? styles.receiptRead : {}),
+                              ...(msg.receipt_status === "delivered" ? styles.receiptDelivered : {}),
+                            }}
+                            title={msg.receipt_status ?? "sent"}
+                          >
+                            {msg.receipt_status === "sent"
+                              ? "✓"
+                              : "✓✓"}
+                          </span>
+                        )}
                       </span>
                     </div>
                   </div>
@@ -1346,7 +1363,11 @@ const styles: Record<string, React.CSSProperties> = {
   msgBubbleEncrypted: { borderLeft: "3px solid #e63946" },
   encryptedIcon: { fontSize: 11, opacity: 0.8 },
   msgBody: { fontSize: 15, lineHeight: 1.5, wordBreak: "break-word" },
-  msgTime: { fontSize: 10, opacity: 0.6, alignSelf: "flex-end" },
+  msgTimeRow: { display: "flex", alignItems: "center", gap: 3, alignSelf: "flex-end" },
+  msgTime: { fontSize: 10, opacity: 0.6 },
+  receiptIcon: { fontSize: 11, color: "rgba(255,255,255,0.45)", lineHeight: 1, flexShrink: 0 },
+  receiptDelivered: { color: "rgba(255,255,255,0.7)" },
+  receiptRead: { color: "#4fc3f7" },
   inputRow: {
     display: "flex", gap: 10, padding: "14px 16px",
     borderTop: "1px solid #2e3147", background: "#1a1d27",

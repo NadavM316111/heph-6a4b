@@ -2,6 +2,36 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 
+// Browser Speech Recognition types (not in default TS lib)
+interface SpeechRecognitionEvent extends Event {
+  readonly resultIndex: number;
+  readonly results: SpeechRecognitionResultList;
+}
+interface SpeechRecognitionResultList {
+  readonly length: number;
+  item(index: number): SpeechRecognitionResult;
+  [index: number]: SpeechRecognitionResult;
+}
+interface SpeechRecognitionResult {
+  readonly isFinal: boolean;
+  readonly length: number;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
+}
+interface SpeechRecognitionAlternative {
+  readonly transcript: string;
+  readonly confidence: number;
+}
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((ev: SpeechRecognitionEvent) => void) | null;
+  start(): void;
+  stop(): void;
+}
+declare const SpeechRecognition: { new (): SpeechRecognition } | undefined;
+
 interface User {
   email: string;
 }
@@ -69,7 +99,7 @@ export default function Home() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const speechRecRef = useRef<SpeechRecognition | null>(null);
+  const speechRecRef = useRef<SpeechRecognitionInstance | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [ndaModal, setNdaModal] = useState(false);
   const [ndaConvId, setNdaConvId] = useState<number | null>(null);
@@ -276,16 +306,17 @@ export default function Home() {
     setIsRecording(true);
 
     // Web Speech API for live transcription
-    const SpeechRecognition =
-      (window as unknown as Record<string, unknown>).SpeechRecognition as typeof window.SpeechRecognition ||
-      (window as unknown as Record<string, unknown>).webkitSpeechRecognition as typeof window.SpeechRecognition;
-    if (SpeechRecognition) {
-      const rec = new SpeechRecognition();
+    const SpeechRecognitionImpl = (
+      (window as unknown as Record<string, unknown>).SpeechRecognition ||
+      (window as unknown as Record<string, unknown>).webkitSpeechRecognition
+    ) as (new () => SpeechRecognition) | undefined;
+    if (SpeechRecognitionImpl) {
+      const rec = new SpeechRecognitionImpl();
       rec.continuous = true;
       rec.interimResults = true;
       rec.lang = "en-US";
       let finalText = "";
-      rec.onresult = (ev: SpeechRecognitionEvent) => {
+      rec.onresult = (ev: SpeechRecognitionEvent): void => {
         let interim = "";
         for (let i = ev.resultIndex; i < ev.results.length; i++) {
           const r = ev.results[i];

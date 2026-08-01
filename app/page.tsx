@@ -297,6 +297,34 @@ export default function Home() {
     { label: "7 days", value: 168 },
   ];
 
+  const [copyBlockedToast, setCopyBlockedToast] = useState(false);
+  const copyBlockedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [screenHidden, setScreenHidden] = useState(false);
+
+  const showCopyBlockedToast = useCallback(() => {
+    setCopyBlockedToast(true);
+    if (copyBlockedTimerRef.current) clearTimeout(copyBlockedTimerRef.current);
+    copyBlockedTimerRef.current = setTimeout(() => setCopyBlockedToast(false), 3000);
+  }, []);
+
+  // Visibility change — fullscreen overlay when app is backgrounded in confidential chat
+  useEffect(() => {
+    const handler = () => {
+      if (document.visibilityState === "hidden") {
+        setScreenHidden(true);
+      } else {
+        setScreenHidden(false);
+      }
+    };
+    document.addEventListener("visibilitychange", handler);
+    return () => document.removeEventListener("visibilitychange", handler);
+  }, []);
+
+  // Show overlay only when in a confidential conversation or confidential group chat
+  const isConfidentialView =
+    (view === "chat" && !!activeConv?.confidential_mode) ||
+    (view === "group-chat" && !!activeGroup?.confidential_mode);
+
   const [ndaModal, setNdaModal] = useState(false);
   const [ndaConvId, setNdaConvId] = useState<number | null>(null);
   const [ndaChecked, setNdaChecked] = useState(false);
@@ -1320,6 +1348,25 @@ export default function Home() {
 
   return (
     <div style={{ ...styles.appWrap, ...(isMobile ? { flexDirection: "column" } : {}) }}>
+      {/* Fullscreen overlay when confidential app is backgrounded */}
+      {screenHidden && isConfidentialView && (
+        <div style={styles.screenHiddenOverlay}>
+          <div style={styles.screenHiddenBox}>
+            <span style={{ fontSize: 56 }}>🔒</span>
+            <h2 style={styles.screenHiddenTitle}>Confidential Screen Hidden</h2>
+            <p style={styles.screenHiddenSub}>
+              This conversation is protected by an International NDA.<br />
+              Content is hidden while the app is in the background.
+            </p>
+          </div>
+        </div>
+      )}
+      {/* Copy-blocked toast */}
+      {copyBlockedToast && (
+        <div style={styles.copyBlockedToast}>
+          🚫 Protected by NDA — copying disabled
+        </div>
+      )}
       {ndaStatusPanelEl}
       {/* Group NDA Modal */}
       {groupNdaModal && (
@@ -2056,6 +2103,13 @@ export default function Home() {
               return null;
             })()}
 
+            {/* Persistent lock warning bar for confidential chats */}
+            {activeConv.confidential_mode && (
+              <div style={styles.confidentialWarningBar}>
+                🔒 <strong>NDA Protected</strong> — Copying, screenshots and forwarding of this conversation are prohibited under the signed International Non-Disclosure Agreement.
+              </div>
+            )}
+
             {/* Messages */}
             <div style={styles.messageList}>
               {messages.length === 0 && (
@@ -2170,9 +2224,20 @@ export default function Home() {
                           ...styles.msgBubble,
                           ...(isMe ? styles.msgBubbleMe : styles.msgBubbleThem),
                           ...(msg.is_encrypted ? styles.msgBubbleEncrypted : {}),
+                        ...(activeConv.confidential_mode ? styles.msgBubbleProtected : {}),
                         }}
                         onClick={() => setPickerMsgId(isPickerOpen ? null : msg.id)}
-                        onContextMenu={(e) => { e.preventDefault(); setPickerMsgId(isPickerOpen ? null : msg.id); }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          if (activeConv.confidential_mode) { showCopyBlockedToast(); return; }
+                          setPickerMsgId(isPickerOpen ? null : msg.id);
+                        }}
+                        onCopy={(e) => {
+                          if (activeConv.confidential_mode) { e.preventDefault(); showCopyBlockedToast(); }
+                        }}
+                        onSelect={() => {
+                          if (activeConv.confidential_mode) { showCopyBlockedToast(); }
+                        }}
                         onTouchStart={() => {
                           longPressTimerRef.current = setTimeout(() => {
                             setPickerMsgId(isPickerOpen ? null : msg.id);
@@ -2761,6 +2826,37 @@ const styles: Record<string, React.CSSProperties> = {
   },
   ndaStatusBadgeSince: {
     fontWeight: 400, opacity: 0.8,
+  },
+  screenHiddenOverlay: {
+    position: "fixed", inset: 0, background: "#0f1117",
+    zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center",
+  },
+  screenHiddenBox: {
+    display: "flex", flexDirection: "column", alignItems: "center",
+    gap: 16, padding: 32, textAlign: "center",
+  },
+  screenHiddenTitle: {
+    color: "#fff", fontSize: 22, margin: 0, fontWeight: 700,
+  },
+  screenHiddenSub: {
+    color: "#888", fontSize: 15, margin: 0, lineHeight: 1.7,
+  },
+  copyBlockedToast: {
+    position: "fixed", bottom: 80, left: "50%", transform: "translateX(-50%)",
+    background: "#e63946", color: "#fff", padding: "10px 22px",
+    borderRadius: 24, fontSize: 13, fontWeight: 600,
+    zIndex: 5000, boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+    whiteSpace: "nowrap", pointerEvents: "none",
+  },
+  confidentialWarningBar: {
+    background: "#1a0a0a", color: "#ff9999",
+    padding: "8px 16px", fontSize: 12,
+    borderBottom: "1px solid #4d1515",
+    lineHeight: 1.5, flexShrink: 0,
+  },
+  msgBubbleProtected: {
+    userSelect: "none" as const,
+    WebkitUserSelect: "none" as const,
   },
   ndaStatusBadgeCaret: {
     fontSize: 14, opacity: 0.7,

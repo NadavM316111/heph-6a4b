@@ -303,6 +303,19 @@ export default function Home() {
   const [ndaSignedName, setNdaSignedName] = useState("");
   const [ndaSubmitting, setNdaSubmitting] = useState(false);
   const [ndaError, setNdaError] = useState("");
+
+  // NDA status panel
+  const [ndaStatusPanel, setNdaStatusPanel] = useState(false);
+  interface NdaAgreement {
+    user_email: string;
+    nda_version: string;
+    ip_address: string | null;
+    signed_name: string | null;
+    receipt_url: string | null;
+    accepted_at: string;
+  }
+  const [ndaAgreements, setNdaAgreements] = useState<NdaAgreement[]>([]);
+  const [ndaStatusLoading, setNdaStatusLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -970,6 +983,94 @@ export default function Home() {
     }
   };
 
+  const openNdaStatusPanel = async (conv: Conversation) => {
+    setNdaStatusLoading(true);
+    setNdaStatusPanel(true);
+    try {
+      const res = await fetch(`/api/conversations/confidential?conversation_id=${conv.id}`);
+      if (res.ok) {
+        const d = await res.json();
+        setNdaAgreements(d.agreements || []);
+      }
+    } finally {
+      setNdaStatusLoading(false);
+    }
+  };
+
+  const downloadNdaPdf = (conv: Conversation) => {
+    const todayStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+    const rows = ndaAgreements.map((a) => {
+      const ts = new Date(a.accepted_at).toLocaleString();
+      return `
+        <tr>
+          <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;">${a.signed_name ?? a.user_email}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;">${a.user_email}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;">${a.nda_version}</td>
+          <td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;">${ts}</td>
+        </tr>`;
+    }).join("");
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>ConfiMessage NDA Receipt — Conversation #${conv.id}</title>
+<style>
+  body { font-family: Georgia, serif; max-width: 780px; margin: 40px auto; color: #111; }
+  h1 { font-size: 22px; border-bottom: 2px solid #111; padding-bottom: 8px; }
+  h2 { font-size: 16px; margin-top: 28px; }
+  .meta { background: #f5f5f5; padding: 14px 18px; border-radius: 6px; font-size: 13px; line-height: 2; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  th { background: #222; color: #fff; padding: 8px 12px; text-align: left; }
+  p { font-size: 13px; line-height: 1.8; color: #333; }
+  .clause { margin-bottom: 12px; }
+  .footer { margin-top: 40px; font-size: 11px; color: #888; border-top: 1px solid #ddd; padding-top: 14px; }
+  @media print { body { margin: 20px; } }
+</style>
+</head>
+<body>
+<h1>🔒 ConfiMessage — NDA Acceptance Receipt</h1>
+<div class="meta">
+  <strong>Conversation ID:</strong> #${conv.id}<br/>
+  <strong>NDA Version:</strong> 2024-01 · International<br/>
+  <strong>Jurisdiction:</strong> International (GDPR · DTSA · UN Convention)<br/>
+  <strong>Effective Date:</strong> ${todayStr}<br/>
+  <strong>Party A:</strong> ${conv.participant_a_email}<br/>
+  <strong>Party B:</strong> ${conv.participant_b_email}<br/>
+  <strong>Confidential Mode Activated:</strong> ${conv.confidential_activated_at ? new Date(conv.confidential_activated_at).toLocaleString() : "—"}
+</div>
+
+<h2>Signatory Records</h2>
+<table>
+  <thead><tr>
+    <th>Full Name (Signed)</th>
+    <th>Email</th>
+    <th>NDA Version</th>
+    <th>Accepted At</th>
+  </tr></thead>
+  <tbody>${rows || "<tr><td colspan='4' style='padding:10px 12px;color:#888;'>No records found.</td></tr>"}</tbody>
+</table>
+
+<h2>Terms Summary</h2>
+<p class="clause"><strong>1. Scope of Confidentiality.</strong> All messages, files, attachments, metadata, and any other information exchanged within this conversation once Confidential Mode is activated are strictly confidential. Neither Party shall disclose, reproduce, distribute, publish, or otherwise make available any Confidential Information to any third party without prior written consent.</p>
+<p class="clause"><strong>2. Duration.</strong> This Agreement takes effect on the date of the later Party's acceptance and remains in force indefinitely unless terminated by written mutual agreement of both Parties.</p>
+<p class="clause"><strong>3. Governing Law.</strong> Governed by international treaty obligations including GDPR (EU) 2016/679, Defend Trade Secrets Act 18 U.S.C. §1836 (USA), Trade Secrets Directive (EU) 2016/943, and equivalent UN Convention statutes.</p>
+<p class="clause"><strong>4. Remedies.</strong> The non-breaching Party is entitled to seek injunctive or other equitable relief in any court of competent jurisdiction.</p>
+<p class="clause"><strong>5. Electronic Acceptance.</strong> Acceptance by clicking the button and entering a typed-name signature constitutes a legally binding electronic signature under E-SIGN (USA), eIDAS (EU) No 910/2014, and equivalent statutes. IP address, device information, email address, typed name, and timestamp are recorded as proof.</p>
+<div class="footer">
+  This receipt was generated automatically by ConfiMessage on ${new Date().toUTCString()}.<br/>
+  ConfiMessage — Private, confidential messaging.
+</div>
+</body>
+</html>`;
+
+    const w = window.open("", "_blank");
+    if (!w) return;
+    w.document.write(html);
+    w.document.close();
+    setTimeout(() => w.print(), 400);
+  };
+
   const setAutoDelete = async (conv: Conversation, hours: number | null) => {
     setAutoDeleteSaving(true);
     const res = await fetch("/api/conversations/autodelete", {
@@ -1097,6 +1198,117 @@ export default function Home() {
     );
   }
 
+  // ── NDA Status Panel ────────────────────────────────────────────────────────
+  const ndaStatusPanelEl = ndaStatusPanel && activeConv ? (
+    <div style={styles.modalOverlay} onClick={() => setNdaStatusPanel(false)}>
+      <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+        <h2 style={styles.modalTitle}>🔒 NDA Status — Conversation #{activeConv.id}</h2>
+
+        {/* Parties */}
+        <div style={styles.ndaMeta}>
+          <div style={styles.ndaMetaRow}>
+            <span style={styles.ndaMetaLabel}>Party A</span>
+            <span style={styles.ndaMetaValue}>{activeConv.participant_a_email}</span>
+          </div>
+          <div style={styles.ndaMetaRow}>
+            <span style={styles.ndaMetaLabel}>Party B</span>
+            <span style={styles.ndaMetaValue}>{activeConv.participant_b_email}</span>
+          </div>
+          <div style={styles.ndaMetaRow}>
+            <span style={styles.ndaMetaLabel}>NDA Version</span>
+            <span style={styles.ndaMetaValue}>2024-01 · International</span>
+          </div>
+          <div style={styles.ndaMetaRow}>
+            <span style={styles.ndaMetaLabel}>Jurisdiction</span>
+            <span style={styles.ndaMetaValue}>GDPR · DTSA · UN Convention</span>
+          </div>
+          {activeConv.confidential_activated_at && (
+            <div style={styles.ndaMetaRow}>
+              <span style={styles.ndaMetaLabel}>Active Since</span>
+              <span style={styles.ndaMetaValue}>{new Date(activeConv.confidential_activated_at).toLocaleString()}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Acceptance records */}
+        <h3 style={{ color: "#fff", fontSize: 15, margin: 0 }}>Signatory Records</h3>
+        {ndaStatusLoading ? (
+          <p style={{ color: "#888", fontSize: 13 }}>Loading…</p>
+        ) : ndaAgreements.length === 0 ? (
+          <p style={{ color: "#888", fontSize: 13 }}>No acceptance records found.</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {ndaAgreements.map((a, i) => (
+              <div key={i} style={styles.ndaAgreementCard}>
+                <div style={styles.ndaAgreementRow}>
+                  <span style={styles.ndaAgreementLabel}>Full Name</span>
+                  <span style={{ ...styles.ndaAgreementValue, fontFamily: "Georgia, serif", color: "#6c63ff", fontSize: 16 }}>
+                    {a.signed_name ?? "—"}
+                  </span>
+                </div>
+                <div style={styles.ndaAgreementRow}>
+                  <span style={styles.ndaAgreementLabel}>Email</span>
+                  <span style={styles.ndaAgreementValue}>{a.user_email}</span>
+                </div>
+                <div style={styles.ndaAgreementRow}>
+                  <span style={styles.ndaAgreementLabel}>NDA Version</span>
+                  <span style={styles.ndaAgreementValue}>{a.nda_version}</span>
+                </div>
+                <div style={styles.ndaAgreementRow}>
+                  <span style={styles.ndaAgreementLabel}>Accepted At</span>
+                  <span style={{ ...styles.ndaAgreementValue, color: "#7ec87e" }}>
+                    ✅ {new Date(a.accepted_at).toLocaleString()}
+                  </span>
+                </div>
+                {a.receipt_url && (
+                  <div style={styles.ndaAgreementRow}>
+                    <span style={styles.ndaAgreementLabel}>Text Receipt</span>
+                    <a href={a.receipt_url} target="_blank" rel="noreferrer" style={{ color: "#6c63ff", fontSize: 12 }}>
+                      View stored receipt ↗
+                    </a>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Pending parties */}
+        {(() => {
+          const signatories = new Set(ndaAgreements.map((a) => a.user_email));
+          const pending = [activeConv.participant_a_email, activeConv.participant_b_email].filter((e) => !signatories.has(e));
+          if (pending.length === 0) return null;
+          return (
+            <div style={styles.ndaPendingBanner}>
+              ⏳ Awaiting signature from: <strong>{pending.join(", ")}</strong>
+            </div>
+          );
+        })()}
+
+        {/* Terms summary */}
+        <h3 style={{ color: "#fff", fontSize: 15, margin: 0 }}>NDA Terms Summary</h3>
+        <div style={styles.ndaScroll}>
+          <p style={styles.ndaClause}><strong>1. Scope.</strong> All messages, files, and metadata exchanged once Confidential Mode is active are legally Confidential Information and may not be disclosed to third parties.</p>
+          <p style={styles.ndaClause}><strong>2. Duration.</strong> Indefinite from the date of the later Party's acceptance, unless terminated by written mutual agreement.</p>
+          <p style={styles.ndaClause}><strong>3. Governing Law.</strong> International treaty obligations — GDPR (EU) 2016/679, Defend Trade Secrets Act 18 U.S.C. §1836 (USA), Trade Secrets Directive (EU) 2016/943, and equivalent UN Convention statutes.</p>
+          <p style={styles.ndaClause}><strong>4. Remedies.</strong> The non-breaching Party may seek injunctive or other equitable relief in any court of competent jurisdiction.</p>
+          <p style={styles.ndaClause}><strong>5. Electronic Signature.</strong> Acceptance constitutes a legally binding e-signature under E-SIGN (USA), eIDAS (EU) No 910/2014, and equivalent statutes. IP, device, email, name and timestamp are on record.</p>
+        </div>
+
+        <div style={styles.modalActions}>
+          <button style={styles.btnSecondary} onClick={() => setNdaStatusPanel(false)}>Close</button>
+          <button
+            style={styles.btnPrimary}
+            onClick={() => downloadNdaPdf(activeConv)}
+            disabled={ndaStatusLoading}
+          >
+            📄 Download PDF Receipt
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   // NDA Modal values (computed for inline rendering)
   const ndaConvForModal = ndaConvId ? conversations.find((c) => c.id === ndaConvId) ?? activeConv : activeConv;
   const otherPartyEmail = ndaConvForModal?.other_email ?? "the other party";
@@ -1108,6 +1320,7 @@ export default function Home() {
 
   return (
     <div style={{ ...styles.appWrap, ...(isMobile ? { flexDirection: "column" } : {}) }}>
+      {ndaStatusPanelEl}
       {/* Group NDA Modal */}
       {groupNdaModal && (
         <div style={styles.modalOverlay}>
@@ -1613,7 +1826,7 @@ export default function Home() {
 
         {view === "chat" && activeConv && (
           <div style={styles.chatWrap}>
-            {/* Chat header */}
+              {/* Chat header */}
             <div style={styles.chatHeader}>
               <button style={styles.backBtn} onClick={() => { setView("list"); setActiveConv(null); setMessages([]); }}>
                 ←
@@ -1624,8 +1837,38 @@ export default function Home() {
               <div style={styles.chatHeaderInfo}>
                 <span style={styles.chatHeaderEmail}>{activeConv.other_email}</span>
                 {activeConv.confidential_mode && (
-                  <span style={styles.confiBadgeSmall}>🔒 Confidential (NDA Active)</span>
+                  <button
+                    style={styles.ndaStatusBadgeBtn}
+                    onClick={() => openNdaStatusPanel(activeConv)}
+                    title="View NDA status and legal summary"
+                  >
+                    🔒 NDA Active
+                    {activeConv.confidential_activated_at && (
+                      <span style={styles.ndaStatusBadgeSince}>
+                        {" "}since {new Date(activeConv.confidential_activated_at).toLocaleDateString()}
+                      </span>
+                    )}
+                    <span style={styles.ndaStatusBadgeCaret}> ›</span>
+                  </button>
                 )}
+                {!activeConv.confidential_mode && (() => {
+                  const isA = activeConv.participant_a_email === myEmail;
+                  const iAccepted = isA ? activeConv.confidential_accepted_by_a : activeConv.confidential_accepted_by_b;
+                  const theyAccepted = isA ? activeConv.confidential_accepted_by_b : activeConv.confidential_accepted_by_a;
+                  if (iAccepted || theyAccepted) {
+                    return (
+                      <button
+                        style={{ ...styles.ndaStatusBadgeBtn, ...styles.ndaStatusBadgePending }}
+                        onClick={() => openNdaStatusPanel(activeConv)}
+                        title="View partial NDA acceptance status"
+                      >
+                        ⏳ NDA Pending
+                        <span style={styles.ndaStatusBadgeCaret}> ›</span>
+                      </button>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
               {/* Auto-delete timer picker — confidential only */}
               {activeConv.confidential_mode && (
@@ -2503,5 +2746,38 @@ const styles: Record<string, React.CSSProperties> = {
   },
   countdownBadgeUrgent: {
     background: "#2d1515", border: "1px solid #4d2020", color: "#ff9999",
+  },
+  ndaStatusBadgeBtn: {
+    display: "inline-flex", alignItems: "center",
+    background: "rgba(230,57,70,0.15)", border: "1px solid rgba(230,57,70,0.4)",
+    color: "#ff9999", borderRadius: 20, padding: "3px 10px",
+    fontSize: 11, fontWeight: 600, cursor: "pointer",
+    marginTop: 3, lineHeight: 1.4, gap: 2,
+    transition: "background 0.15s",
+  },
+  ndaStatusBadgePending: {
+    background: "rgba(255,200,50,0.1)", border: "1px solid rgba(255,200,50,0.3)",
+    color: "#ffd166",
+  },
+  ndaStatusBadgeSince: {
+    fontWeight: 400, opacity: 0.8,
+  },
+  ndaStatusBadgeCaret: {
+    fontSize: 14, opacity: 0.7,
+  },
+  ndaAgreementCard: {
+    background: "#12151e", border: "1px solid #2e3147",
+    borderRadius: 10, padding: "12px 16px",
+    display: "flex", flexDirection: "column", gap: 6,
+  },
+  ndaAgreementRow: {
+    display: "flex", gap: 10, alignItems: "baseline",
+  },
+  ndaAgreementLabel: {
+    color: "#555", fontSize: 11, fontWeight: 600,
+    textTransform: "uppercase" as const, minWidth: 100, flexShrink: 0,
+  },
+  ndaAgreementValue: {
+    color: "#ccc", fontSize: 13,
   },
 };

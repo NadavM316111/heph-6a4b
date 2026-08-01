@@ -34,6 +34,40 @@ async function ensureNdaTables() {
 
 const NDA_VERSION = "2024-01";
 
+export async function GET(req: NextRequest) {
+  const email = await getSessionEmail(req);
+  if (!email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  await ensureNdaTables();
+
+  const { searchParams } = new URL(req.url);
+  const conversation_id = searchParams.get("conversation_id");
+  if (!conversation_id) return NextResponse.json({ error: "conversation_id required" }, { status: 400 });
+
+  // Verify user is a participant
+  const convRows = await q(
+    `SELECT * FROM ` + P + `_conversations WHERE id = $1 AND (participant_a_email = $2 OR participant_b_email = $3)`,
+    [conversation_id, email, email]
+  );
+  if (convRows.length === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  const conv = convRows[0];
+
+  // Fetch NDA agreement records for both participants
+  const agreements = await q(
+    `SELECT user_email, nda_version, ip_address, signed_name, receipt_url, accepted_at
+     FROM ` + P + `_nda_agreements
+     WHERE conversation_id = $1
+     ORDER BY accepted_at ASC`,
+    [conversation_id]
+  );
+
+  return NextResponse.json({
+    conversation: conv,
+    agreements,
+  });
+}
+
 export async function POST(req: NextRequest) {
   const email = await getSessionEmail(req);
   if (!email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

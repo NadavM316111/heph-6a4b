@@ -47,6 +47,8 @@ export default function Home() {
   const [loginMode, setLoginMode] = useState<"login" | "signup">("login");
   const [loginError, setLoginError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [notifAsked, setNotifAsked] = useState(false);
+  const lastMsgIdRef = useRef<number>(0);
   const [ndaModal, setNdaModal] = useState(false);
   const [ndaConvId, setNdaConvId] = useState<number | null>(null);
   const [ndaChecked, setNdaChecked] = useState(false);
@@ -73,11 +75,43 @@ export default function Home() {
     }
   }, [user]);
 
-  const fetchMessages = useCallback(async (convId: number) => {
+  const requestNotifPermission = useCallback(async () => {
+    if (typeof Notification === "undefined") return;
+    if (Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+    setNotifAsked(true);
+  }, []);
+
+  const fetchMessages = useCallback(async (convId: number, currentUserEmail: string) => {
     const res = await fetch(`/api/messages?conversation_id=${convId}`);
     if (res.ok) {
       const data = await res.json();
-      setMessages(data.messages || []);
+      const fetched: Message[] = data.messages || [];
+      setMessages(fetched);
+
+      // Fire browser notifications for any new incoming messages
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        const prevMax = lastMsgIdRef.current;
+        fetched.forEach((msg) => {
+          if (msg.id > prevMax && msg.sender_email !== currentUserEmail) {
+            const preview = msg.body.length > 80 ? msg.body.slice(0, 77) + "…" : msg.body;
+            try {
+              new Notification("ConfiMessage — " + msg.sender_email, {
+                body: preview,
+                icon: "/icon.png",
+                tag: "msg-" + msg.id,
+              });
+            } catch {
+              // ignore
+            }
+          }
+        });
+      }
+      if (fetched.length > 0) {
+        const maxId = Math.max(...fetched.map((m) => m.id));
+        if (maxId > lastMsgIdRef.current) lastMsgIdRef.current = maxId;
+      }
     }
   }, []);
 
@@ -85,12 +119,20 @@ export default function Home() {
     if (user) fetchConversations();
   }, [user, fetchConversations]);
 
+  // Ask for notification permission the first time an incoming message is seen
+  useEffect(() => {
+    if (!notifAsked && user && messages.some((m) => m.sender_email !== user.email)) {
+      requestNotifPermission();
+    }
+  }, [messages, notifAsked, user, requestNotifPermission]);
+
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     if (view === "list" && user) {
       pollRef.current = setInterval(fetchConversations, 5000);
     } else if (view === "chat" && activeConv) {
-      pollRef.current = setInterval(() => fetchMessages(activeConv.id), 3000);
+      const email = user?.email || "";
+      pollRef.current = setInterval(() => fetchMessages(activeConv.id, email), 3000);
     }
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -138,7 +180,8 @@ export default function Home() {
   const openConversation = async (conv: Conversation) => {
     setActiveConv(conv);
     setView("chat");
-    await fetchMessages(conv.id);
+    lastMsgIdRef.current = 0;
+    await fetchMessages(conv.id, user?.email || "");
     // Mark as read
     await fetch("/api/conversations/read", {
       method: "POST",
@@ -158,7 +201,7 @@ export default function Home() {
       body: JSON.stringify({ conversation_id: activeConv.id, body }),
     });
     if (res.ok) {
-      await fetchMessages(activeConv.id);
+      await fetchMessages(activeConv.id, user?.email || "");
       await fetchConversations();
     }
   };
@@ -308,7 +351,6 @@ export default function Home() {
 
   const myEmail = user?.email || "";
 
-  // Loading state
   if (user === undefined) {
     return (
       <div style={styles.centered}>

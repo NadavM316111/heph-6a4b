@@ -11,9 +11,15 @@ async function ensureNdaTables() {
     "nda_version TEXT NOT NULL," +
     "ip_address TEXT," +
     "user_agent TEXT," +
+    "signed_name TEXT," +
+    "receipt_url TEXT," +
     "accepted_at TIMESTAMPTZ DEFAULT now()," +
     "created_at TIMESTAMPTZ DEFAULT now())"
   );
+  // Add columns to existing tables if they were created without them
+  await q(`ALTER TABLE ` + P + `_nda_agreements ADD COLUMN IF NOT EXISTS signed_name TEXT`, []);
+  await q(`ALTER TABLE ` + P + `_nda_agreements ADD COLUMN IF NOT EXISTS receipt_url TEXT`, []);
+
   await ensureTable(
     "CREATE TABLE IF NOT EXISTS " + P + "_nda_documents (" +
     "id SERIAL PRIMARY KEY," +
@@ -34,7 +40,7 @@ export async function POST(req: NextRequest) {
 
   await ensureNdaTables();
 
-  const { conversation_id, enable, accept_nda } = await req.json();
+  const { conversation_id, enable, accept_nda, signed_name, receipt_url } = await req.json();
   if (!conversation_id) return NextResponse.json({ error: "conversation_id required" }, { status: 400 });
 
   // Verify user is a participant
@@ -51,32 +57,46 @@ export async function POST(req: NextRequest) {
     if (!accept_nda) {
       return NextResponse.json({ error: "NDA acceptance required" }, { status: 400 });
     }
+    if (!signed_name || !signed_name.trim()) {
+      return NextResponse.json({ error: "Signed name required" }, { status: 400 });
+    }
 
     // Record NDA agreement
     const ip = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "unknown";
     const ua = req.headers.get("user-agent") || "unknown";
 
     await q(
-      `INSERT INTO ` + P + `_nda_agreements (conversation_id, user_email, nda_version, ip_address, user_agent) VALUES ($1, $2, $3, $4, $5)`,
-      [conversation_id, email, NDA_VERSION, ip, ua]
+      `INSERT INTO ` + P + `_nda_agreements (conversation_id, user_email, nda_version, ip_address, user_agent, signed_name, receipt_url) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [conversation_id, email, NDA_VERSION, ip, ua, signed_name.trim(), receipt_url || null]
     );
 
-    // Update conversation
+    // Mark this user's acceptance; only set confidential_mode=TRUE when BOTH parties have accepted
     const acceptField = isA ? "confidential_accepted_by_a" : "confidential_accepted_by_b";
+    const otherAcceptField = isA ? "confidential_accepted_by_b" : "confidential_accepted_by_a";
+
     const updateRows = await q(
       `UPDATE ` + P + `_conversations SET
-        confidential_mode = TRUE,
+        ` + acceptField + ` = TRUE,
         confidential_activated_at = COALESCE(confidential_activated_at, now()),
-        ` + acceptField + ` = TRUE
+        confidential_mode = CASE WHEN ` + otherAcceptField + ` = TRUE THEN TRUE ELSE FALSE END
        WHERE id = $1 RETURNING *`,
       [conversation_id]
     );
 
-    return NextResponse.json({ conversation: { ...updateRows[0], other_email: isA ? conv.participant_b_email : conv.participant_a_email } });
+    const updated = updateRows[0];
+    return NextResponse.json({
+      conversation: { ...updated, other_email: isA ? conv.participant_b_email : conv.participant_a_email },
+      both_accepted: updated.confidential_accepted_by_a && updated.confidential_accepted_by_b,
+    });
   } else {
-    // Disable confidential mode
+    // Disable confidential mode — reset both acceptance flags
     const updateRows = await q(
-      `UPDATE ` + P + `_conversations SET confidential_mode = FALSE WHERE id = $1 RETURNING *`,
+      `UPDATE ` + P + `_conversations SET
+        confidential_mode = FALSE,
+        confidential_accepted_by_a = FALSE,
+        confidential_accepted_by_b = FALSE,
+        confidential_activated_at = NULL
+       WHERE id = $1 RETURNING *`,
       [conversation_id]
     );
     return NextResponse.json({ conversation: { ...updateRows[0], other_email: isA ? conv.participant_b_email : conv.participant_a_email } });

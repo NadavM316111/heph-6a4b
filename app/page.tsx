@@ -49,6 +49,10 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [ndaModal, setNdaModal] = useState(false);
   const [ndaConvId, setNdaConvId] = useState<number | null>(null);
+  const [ndaChecked, setNdaChecked] = useState(false);
+  const [ndaSignedName, setNdaSignedName] = useState("");
+  const [ndaSubmitting, setNdaSubmitting] = useState(false);
+  const [ndaError, setNdaError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -196,6 +200,9 @@ export default function Home() {
     if (!conv.confidential_mode) {
       // Show NDA acceptance modal
       setNdaConvId(conv.id);
+      setNdaChecked(false);
+      setNdaSignedName("");
+      setNdaError("");
       setNdaModal(true);
     } else {
       // Turn off
@@ -214,19 +221,88 @@ export default function Home() {
 
   const acceptNda = async () => {
     if (!ndaConvId) return;
+    if (!ndaChecked) { setNdaError("You must check the agreement checkbox."); return; }
+    if (!ndaSignedName.trim()) { setNdaError("You must type your full name as your signature."); return; }
+
+    setNdaSubmitting(true);
+    setNdaError("");
+
+    // Build a plain-text receipt and upload it as a blob
+    let receiptUrl: string | null = null;
+    try {
+      const now = new Date();
+      const receiptText = [
+        "===========================================",
+        "   CONFI MESSAGE — NDA ACCEPTANCE RECEIPT",
+        "===========================================",
+        "",
+        "NDA Version  : 2024-01",
+        "Jurisdiction : International",
+        "Date/Time    : " + now.toUTCString(),
+        "Conversation : #" + ndaConvId,
+        "",
+        "SIGNATORY",
+        "---------",
+        "Email        : " + (user?.email ?? ""),
+        "Full Name    : " + ndaSignedName.trim(),
+        "",
+        "TERMS ACCEPTED",
+        "--------------",
+        "1. Confidential Information — all messages exchanged once Confidential",
+        "   Mode is active are legally Confidential Information.",
+        "2. Duration — indefinite from date of activation.",
+        "3. Governing Law — international treaty obligations, GDPR (EU),",
+        "   Defend Trade Secrets Act (USA), and equivalent UN Convention statutes.",
+        "4. Remedies — injunctive relief available to the non-breaching party.",
+        "5. Entire Agreement — supersedes all prior negotiations on this subject.",
+        "",
+        "By clicking 'I Accept', the signatory confirmed they read, understood,",
+        "and agreed to be bound by the above terms.",
+        "",
+        "===========================================",
+        "This receipt was generated automatically by ConfiMessage.",
+        "===========================================",
+      ].join("\n");
+
+      const blob = new Blob([receiptText], { type: "text/plain" });
+      const fd = new FormData();
+      fd.append("file", blob, "nda-receipt-" + ndaConvId + "-" + Date.now() + ".txt");
+      const uploadRes = await fetch("/api/upload", { method: "POST", body: fd });
+      if (uploadRes.ok) {
+        const uploadData = await uploadRes.json();
+        receiptUrl = uploadData.url || null;
+      }
+    } catch {
+      // receipt upload failure is non-fatal
+    }
+
     const res = await fetch("/api/conversations/confidential", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation_id: ndaConvId, enable: true, accept_nda: true }),
+      body: JSON.stringify({
+        conversation_id: ndaConvId,
+        enable: true,
+        accept_nda: true,
+        signed_name: ndaSignedName.trim(),
+        receipt_url: receiptUrl,
+      }),
     });
+
+    setNdaSubmitting(false);
+
     if (res.ok) {
       const d = await res.json();
       setNdaModal(false);
       setNdaConvId(null);
+      setNdaChecked(false);
+      setNdaSignedName("");
       if (activeConv && activeConv.id === ndaConvId) {
-        setActiveConv(d.conversation || { ...activeConv, confidential_mode: true });
+        setActiveConv(d.conversation ?? activeConv);
       }
       await fetchConversations();
+    } else {
+      const d = await res.json().catch(() => ({}));
+      setNdaError(d.error || "Failed to record acceptance. Please try again.");
     }
   };
 
@@ -293,57 +369,165 @@ export default function Home() {
   }
 
   // NDA Modal
+  const ndaConvForModal = ndaConvId ? conversations.find((c) => c.id === ndaConvId) ?? activeConv : activeConv;
+  const otherPartyEmail = ndaConvForModal?.other_email ?? "the other party";
+  const todayStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+
   const NdaModal = () => (
     <div style={styles.modalOverlay}>
       <div style={styles.modalBox}>
-        <h2 style={styles.modalTitle}>🔒 Enable Confidential Mode</h2>
-        <p style={styles.modalBody}>
-          By enabling Confidential Mode, you agree that this entire conversation
-          is covered under an <strong>International Non-Disclosure Agreement (NDA)</strong>.
-        </p>
-        <div style={styles.ndaScroll}>
-          <h3>International Non-Disclosure Agreement</h3>
-          <p><strong>Version:</strong> 2024-01 &nbsp;|&nbsp; <strong>Jurisdiction:</strong> International</p>
-          <p>
-            This Non-Disclosure Agreement (&quot;Agreement&quot;) is entered into between the
-            participants of this conversation (&quot;Parties&quot;) as identified by their
-            registered ConfiMessage account emails.
-          </p>
-          <p><strong>1. Confidential Information.</strong> All messages, files, and data
-            exchanged within this conversation once Confidential Mode is activated shall
-            be deemed &quot;Confidential Information.&quot; Each Party agrees not to disclose,
-            reproduce, or distribute Confidential Information to any third party without
-            prior written consent from the other Party.</p>
-          <p><strong>2. Duration.</strong> This Agreement shall remain in force indefinitely
-            from the date of activation unless both Parties agree in writing to terminate it.</p>
-          <p><strong>3. Governing Law.</strong> This Agreement is governed by international
-            treaty obligations and the laws of the jurisdiction most favorable to enforcing
-            confidentiality, including but not limited to GDPR (EU), the Defend Trade Secrets
-            Act (USA), and equivalent statutes in all signatory nations of the UN Convention
-            on Contracts.</p>
-          <p><strong>4. Remedies.</strong> Both Parties acknowledge that a breach of this
-            Agreement may cause irreparable harm and that the non-breaching Party shall be
-            entitled to seek injunctive relief in any court of competent jurisdiction, in
-            addition to any other remedies available at law or in equity.</p>
-          <p><strong>5. Entire Agreement.</strong> This Agreement constitutes the entire
-            understanding between the Parties with respect to the subject matter hereof
-            and supersedes all prior negotiations, representations, or agreements.</p>
-          <p><strong>6. Acceptance.</strong> By clicking &quot;I Accept &amp; Enable Confidential Mode&quot;
-            you acknowledge that you have read, understood, and agree to be bound by the
-            terms of this Agreement. Your IP address and device information will be recorded
-            as proof of acceptance.</p>
+        <h2 style={styles.modalTitle}>🔒 International Non-Disclosure Agreement</h2>
+
+        {/* Header meta */}
+        <div style={styles.ndaMeta}>
+          <div style={styles.ndaMetaRow}>
+            <span style={styles.ndaMetaLabel}>NDA Version</span>
+            <span style={styles.ndaMetaValue}>2024-01</span>
+          </div>
+          <div style={styles.ndaMetaRow}>
+            <span style={styles.ndaMetaLabel}>Jurisdiction</span>
+            <span style={styles.ndaMetaValue}>International (GDPR · DTSA · UN Convention)</span>
+          </div>
+          <div style={styles.ndaMetaRow}>
+            <span style={styles.ndaMetaLabel}>Effective Date</span>
+            <span style={styles.ndaMetaValue}>{todayStr}</span>
+          </div>
+          <div style={styles.ndaMetaRow}>
+            <span style={styles.ndaMetaLabel}>Party A</span>
+            <span style={styles.ndaMetaValue}>{user?.email}</span>
+          </div>
+          <div style={styles.ndaMetaRow}>
+            <span style={styles.ndaMetaLabel}>Party B</span>
+            <span style={styles.ndaMetaValue}>{otherPartyEmail}</span>
+          </div>
+          <div style={styles.ndaMetaRow}>
+            <span style={styles.ndaMetaLabel}>Conversation</span>
+            <span style={styles.ndaMetaValue}>#{ndaConvId}</span>
+          </div>
         </div>
+
+        {/* Scrollable terms */}
+        <div style={styles.ndaScroll}>
+          <p style={styles.ndaIntro}>
+            This Non-Disclosure Agreement (<strong>&quot;Agreement&quot;</strong>) is entered
+            into as of <strong>{todayStr}</strong> between the Parties identified above,
+            each a registered user of ConfiMessage, a confidential messaging platform.
+          </p>
+
+          <p style={styles.ndaClause}><strong>1. Scope of Confidentiality.</strong>{" "}
+            All messages, files, attachments, metadata, and any other information exchanged
+            within this conversation (<strong>&quot;Confidential Information&quot;</strong>) once
+            Confidential Mode is activated shall be strictly confidential. Neither Party shall
+            disclose, reproduce, distribute, publish, or otherwise make available any
+            Confidential Information to any third party without the prior written consent
+            of the disclosing Party.</p>
+
+          <p style={styles.ndaClause}><strong>2. Permitted Use.</strong>{" "}
+            Each Party may use Confidential Information solely for the purpose of
+            communicating within this conversation. No licence, express or implied,
+            over any intellectual property right is granted by this Agreement.</p>
+
+          <p style={styles.ndaClause}><strong>3. Exclusions.</strong>{" "}
+            The obligations in §1 do not apply to information that: (a) is or becomes
+            publicly available through no fault of the receiving Party; (b) was rightfully
+            known by the receiving Party before disclosure; (c) is independently developed
+            without use of Confidential Information; or (d) must be disclosed by law,
+            provided the receiving Party gives prompt notice where permitted.</p>
+
+          <p style={styles.ndaClause}><strong>4. Duration.</strong>{" "}
+            This Agreement takes effect on the date of the later Party&apos;s acceptance
+            and remains in force indefinitely unless terminated by written mutual agreement
+            of both Parties.</p>
+
+          <p style={styles.ndaClause}><strong>5. Governing Law &amp; Jurisdiction.</strong>{" "}
+            This Agreement is governed by international treaty obligations and, where
+            applicable, the laws of the jurisdiction most favourable to enforcing
+            confidentiality, including the General Data Protection Regulation (EU) 2016/679,
+            the Defend Trade Secrets Act 18 U.S.C. §1836 (USA), the Trade Secrets
+            Directive (EU) 2016/943, and equivalent statutes in all signatory nations
+            of the UN Convention on Contracts for the International Sale of Goods.
+            The Parties submit to the non-exclusive jurisdiction of the courts most
+            competent to enforce this Agreement.</p>
+
+          <p style={styles.ndaClause}><strong>6. Remedies.</strong>{" "}
+            Both Parties acknowledge that breach may cause irreparable harm for which
+            monetary damages are an inadequate remedy. The non-breaching Party is entitled
+            to seek injunctive or other equitable relief in any court of competent
+            jurisdiction, without the need to post bond, in addition to all other remedies
+            at law or in equity.</p>
+
+          <p style={styles.ndaClause}><strong>7. Entire Agreement.</strong>{" "}
+            This Agreement constitutes the entire understanding between the Parties with
+            respect to confidentiality of the subject conversation and supersedes all prior
+            negotiations, representations, warranties, or agreements relating thereto.</p>
+
+          <p style={styles.ndaClause}><strong>8. Electronic Acceptance &amp; Record.</strong>{" "}
+            Acceptance by clicking the button below and entering a typed-name signature
+            constitutes a legally binding electronic signature under the Electronic
+            Signatures in Global and National Commerce Act (E-SIGN, USA), eIDAS
+            Regulation (EU) No 910/2014, and equivalent statutes. Your IP address,
+            device information, email address, typed name, and timestamp will be recorded
+            and a receipt stored as proof of acceptance. Confidential Mode activates
+            only after <strong>both Parties</strong> have individually accepted.</p>
+        </div>
+
+        {/* Signature block */}
+        <div style={styles.signatureBlock}>
+          <label style={styles.checkLabel}>
+            <input
+              type="checkbox"
+              checked={ndaChecked}
+              onChange={(e) => setNdaChecked(e.target.checked)}
+              style={styles.checkbox}
+            />
+            <span>
+              I have read and fully understand the above Agreement and agree to be
+              bound by its terms on behalf of myself.
+            </span>
+          </label>
+          <div style={styles.signatureRow}>
+            <label style={styles.signatureLabel}>
+              Type your full legal name as your electronic signature:
+            </label>
+            <input
+              style={styles.signatureInput}
+              type="text"
+              placeholder="Full Name"
+              value={ndaSignedName}
+              onChange={(e) => setNdaSignedName(e.target.value)}
+              autoComplete="name"
+            />
+            {ndaSignedName.trim() && (
+              <div style={styles.signaturePreview}>{ndaSignedName.trim()}</div>
+            )}
+          </div>
+          {ndaError && <p style={styles.ndaErrorText}>{ndaError}</p>}
+        </div>
+
         <div style={styles.modalActions}>
           <button
             style={styles.btnSecondary}
-            onClick={() => { setNdaModal(false); setNdaConvId(null); }}
+            disabled={ndaSubmitting}
+            onClick={() => { setNdaModal(false); setNdaConvId(null); setNdaChecked(false); setNdaSignedName(""); setNdaError(""); }}
           >
             Cancel
           </button>
-          <button style={styles.btnConfidential} onClick={acceptNda}>
-            I Accept &amp; Enable Confidential Mode
+          <button
+            style={{
+              ...styles.btnConfidential,
+              opacity: (!ndaChecked || !ndaSignedName.trim() || ndaSubmitting) ? 0.5 : 1,
+              cursor: (!ndaChecked || !ndaSignedName.trim() || ndaSubmitting) ? "not-allowed" : "pointer",
+            }}
+            onClick={acceptNda}
+            disabled={!ndaChecked || !ndaSignedName.trim() || ndaSubmitting}
+          >
+            {ndaSubmitting ? "Recording acceptance…" : "I Accept — Sign & Enable Confidential Mode"}
           </button>
         </div>
+        <p style={styles.ndaFootnote}>
+          A timestamped receipt will be generated and stored as proof of your acceptance.
+          Confidential Mode activates once <strong>both parties</strong> have signed.
+        </p>
       </div>
     </div>
   );
@@ -470,7 +654,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* NDA notice banner */}
+            {/* NDA notice banner — active */}
             {activeConv.confidential_mode && (
               <div style={styles.ndaBanner}>
                 🔒 <strong>Confidential Mode Active</strong> — This conversation is protected
@@ -482,6 +666,44 @@ export default function Home() {
                 )}
               </div>
             )}
+
+            {/* Pending banner — user already accepted but waiting for other party */}
+            {!activeConv.confidential_mode && (() => {
+              const isA = activeConv.participant_a_email === myEmail;
+              const iAccepted = isA ? activeConv.confidential_accepted_by_a : activeConv.confidential_accepted_by_b;
+              const theyAccepted = isA ? activeConv.confidential_accepted_by_b : activeConv.confidential_accepted_by_a;
+              if (iAccepted && !theyAccepted) {
+                return (
+                  <div style={styles.ndaPendingBanner}>
+                    ⏳ <strong>Waiting for {activeConv.other_email}</strong> to review and sign
+                    the NDA. Confidential Mode will activate once both parties have accepted.
+                  </div>
+                );
+              }
+              if (!iAccepted && theyAccepted) {
+                return (
+                  <div style={styles.ndaActionBanner}>
+                    <span>
+                      ✍️ <strong>{activeConv.other_email}</strong> has signed the NDA and is
+                      requesting Confidential Mode for this conversation.
+                    </span>
+                    <button
+                      style={styles.btnAcceptNda}
+                      onClick={() => {
+                        setNdaConvId(activeConv.id);
+                        setNdaChecked(false);
+                        setNdaSignedName("");
+                        setNdaError("");
+                        setNdaModal(true);
+                      }}
+                    >
+                      Review &amp; Sign NDA
+                    </button>
+                  </div>
+                );
+              }
+              return null;
+            })()}
 
             {/* Messages */}
             <div style={styles.messageList}>
@@ -738,21 +960,72 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
   },
   sendBtnConfidential: { background: "#e63946" },
+  ndaPendingBanner: {
+    background: "#1a2a1a", color: "#7ec87e", padding: "10px 20px",
+    fontSize: 13, borderBottom: "1px solid #2a4a2a",
+  },
+  ndaActionBanner: {
+    background: "#1a1a2e", color: "#99aaff", padding: "10px 20px",
+    fontSize: 13, borderBottom: "1px solid #2a2a5a",
+    display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" as const,
+  },
+  btnAcceptNda: {
+    padding: "7px 16px", background: "#6c63ff", color: "#fff",
+    border: "none", borderRadius: 8, fontSize: 13, fontWeight: 600,
+    cursor: "pointer", whiteSpace: "nowrap" as const, flexShrink: 0,
+  },
   modalOverlay: {
-    position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)",
+    position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)",
     display: "flex", alignItems: "center", justifyContent: "center",
-    zIndex: 1000, padding: 16,
+    zIndex: 1000, padding: 16, overflowY: "auto" as const,
   },
   modalBox: {
-    background: "#1a1d27", borderRadius: 16, padding: "32px 28px",
-    width: "100%", maxWidth: 560, boxShadow: "0 8px 40px rgba(0,0,0,0.6)",
-    display: "flex", flexDirection: "column", gap: 16,
+    background: "#1a1d27", borderRadius: 16, padding: "28px 24px",
+    width: "100%", maxWidth: 620, boxShadow: "0 8px 40px rgba(0,0,0,0.7)",
+    display: "flex", flexDirection: "column", gap: 14,
+    maxHeight: "90vh", overflowY: "auto" as const,
+    margin: "auto",
   },
-  modalTitle: { color: "#fff", fontSize: 22, margin: 0 },
+  modalTitle: { color: "#fff", fontSize: 20, margin: 0, fontWeight: 700 },
   modalBody: { color: "#bbb", fontSize: 14, margin: 0, lineHeight: 1.6 },
-  ndaScroll: {
-    background: "#12151e", borderRadius: 8, padding: "16px 20px",
-    maxHeight: 280, overflowY: "auto", color: "#aaa", fontSize: 13, lineHeight: 1.7,
+  ndaMeta: {
+    background: "#12151e", borderRadius: 8, padding: "12px 16px",
+    display: "flex", flexDirection: "column", gap: 6,
+    border: "1px solid #2e3147",
   },
-  modalActions: { display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 8 },
+  ndaMetaRow: { display: "flex", gap: 12, alignItems: "baseline" },
+  ndaMetaLabel: { color: "#666", fontSize: 11, fontWeight: 600, textTransform: "uppercase" as const, minWidth: 110 },
+  ndaMetaValue: { color: "#ccc", fontSize: 13 },
+  ndaScroll: {
+    background: "#12151e", borderRadius: 8, padding: "14px 18px",
+    maxHeight: 240, overflowY: "auto", color: "#aaa", fontSize: 13, lineHeight: 1.8,
+    border: "1px solid #2e3147",
+  },
+  ndaIntro: { color: "#bbb", marginBottom: 10, marginTop: 0 },
+  ndaClause: { color: "#aaa", marginBottom: 10, marginTop: 0 },
+  signatureBlock: {
+    background: "#12151e", borderRadius: 8, padding: "16px 18px",
+    display: "flex", flexDirection: "column", gap: 12,
+    border: "1px solid #2e3147",
+  },
+  checkLabel: {
+    display: "flex", alignItems: "flex-start", gap: 10,
+    color: "#ccc", fontSize: 13, lineHeight: 1.6, cursor: "pointer",
+  },
+  checkbox: { marginTop: 3, accentColor: "#6c63ff", width: 16, height: 16, flexShrink: 0 },
+  signatureRow: { display: "flex", flexDirection: "column", gap: 6 },
+  signatureLabel: { color: "#888", fontSize: 12 },
+  signatureInput: {
+    padding: "10px 14px", borderRadius: 8, border: "1px solid #2e3147",
+    background: "#0f1117", color: "#fff", fontSize: 15, outline: "none",
+    width: "100%", boxSizing: "border-box" as const,
+  },
+  signaturePreview: {
+    fontFamily: "Georgia, serif", fontSize: 22, color: "#6c63ff",
+    padding: "6px 0 2px", borderBottom: "2px solid #6c63ff",
+    minHeight: 36, letterSpacing: "0.5px",
+  },
+  ndaErrorText: { color: "#ff6b6b", fontSize: 13, margin: 0 },
+  ndaFootnote: { color: "#555", fontSize: 12, margin: 0, textAlign: "center" as const, lineHeight: 1.5 },
+  modalActions: { display: "flex", gap: 12, justifyContent: "flex-end", flexWrap: "wrap" as const },
 };

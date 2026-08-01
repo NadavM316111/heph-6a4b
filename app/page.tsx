@@ -579,169 +579,10 @@ export default function Home() {
     );
   }
 
-  // NDA Modal
+  // NDA Modal values (computed for inline rendering)
   const ndaConvForModal = ndaConvId ? conversations.find((c) => c.id === ndaConvId) ?? activeConv : activeConv;
   const otherPartyEmail = ndaConvForModal?.other_email ?? "the other party";
   const todayStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
-
-  const NdaModal = () => (
-    <div style={styles.modalOverlay}>
-      <div style={styles.modalBox}>
-        <h2 style={styles.modalTitle}>🔒 International Non-Disclosure Agreement</h2>
-
-        {/* Header meta */}
-        <div style={styles.ndaMeta}>
-          <div style={styles.ndaMetaRow}>
-            <span style={styles.ndaMetaLabel}>NDA Version</span>
-            <span style={styles.ndaMetaValue}>2024-01</span>
-          </div>
-          <div style={styles.ndaMetaRow}>
-            <span style={styles.ndaMetaLabel}>Jurisdiction</span>
-            <span style={styles.ndaMetaValue}>International (GDPR · DTSA · UN Convention)</span>
-          </div>
-          <div style={styles.ndaMetaRow}>
-            <span style={styles.ndaMetaLabel}>Effective Date</span>
-            <span style={styles.ndaMetaValue}>{todayStr}</span>
-          </div>
-          <div style={styles.ndaMetaRow}>
-            <span style={styles.ndaMetaLabel}>Party A</span>
-            <span style={styles.ndaMetaValue}>{user?.email}</span>
-          </div>
-          <div style={styles.ndaMetaRow}>
-            <span style={styles.ndaMetaLabel}>Party B</span>
-            <span style={styles.ndaMetaValue}>{otherPartyEmail}</span>
-          </div>
-          <div style={styles.ndaMetaRow}>
-            <span style={styles.ndaMetaLabel}>Conversation</span>
-            <span style={styles.ndaMetaValue}>#{ndaConvId}</span>
-          </div>
-        </div>
-
-        {/* Scrollable terms */}
-        <div style={styles.ndaScroll}>
-          <p style={styles.ndaIntro}>
-            This Non-Disclosure Agreement (<strong>&quot;Agreement&quot;</strong>) is entered
-            into as of <strong>{todayStr}</strong> between the Parties identified above,
-            each a registered user of ConfiMessage, a confidential messaging platform.
-          </p>
-
-          <p style={styles.ndaClause}><strong>1. Scope of Confidentiality.</strong>{" "}
-            All messages, files, attachments, metadata, and any other information exchanged
-            within this conversation (<strong>&quot;Confidential Information&quot;</strong>) once
-            Confidential Mode is activated shall be strictly confidential. Neither Party shall
-            disclose, reproduce, distribute, publish, or otherwise make available any
-            Confidential Information to any third party without the prior written consent
-            of the disclosing Party.</p>
-
-          <p style={styles.ndaClause}><strong>2. Permitted Use.</strong>{" "}
-            Each Party may use Confidential Information solely for the purpose of
-            communicating within this conversation. No licence, express or implied,
-            over any intellectual property right is granted by this Agreement.</p>
-
-          <p style={styles.ndaClause}><strong>3. Exclusions.</strong>{" "}
-            The obligations in §1 do not apply to information that: (a) is or becomes
-            publicly available through no fault of the receiving Party; (b) was rightfully
-            known by the receiving Party before disclosure; (c) is independently developed
-            without use of Confidential Information; or (d) must be disclosed by law,
-            provided the receiving Party gives prompt notice where permitted.</p>
-
-          <p style={styles.ndaClause}><strong>4. Duration.</strong>{" "}
-            This Agreement takes effect on the date of the later Party&apos;s acceptance
-            and remains in force indefinitely unless terminated by written mutual agreement
-            of both Parties.</p>
-
-          <p style={styles.ndaClause}><strong>5. Governing Law &amp; Jurisdiction.</strong>{" "}
-            This Agreement is governed by international treaty obligations and, where
-            applicable, the laws of the jurisdiction most favourable to enforcing
-            confidentiality, including the General Data Protection Regulation (EU) 2016/679,
-            the Defend Trade Secrets Act 18 U.S.C. §1836 (USA), the Trade Secrets
-            Directive (EU) 2016/943, and equivalent statutes in all signatory nations
-            of the UN Convention on Contracts for the International Sale of Goods.
-            The Parties submit to the non-exclusive jurisdiction of the courts most
-            competent to enforce this Agreement.</p>
-
-          <p style={styles.ndaClause}><strong>6. Remedies.</strong>{" "}
-            Both Parties acknowledge that breach may cause irreparable harm for which
-            monetary damages are an inadequate remedy. The non-breaching Party is entitled
-            to seek injunctive or other equitable relief in any court of competent
-            jurisdiction, without the need to post bond, in addition to all other remedies
-            at law or in equity.</p>
-
-          <p style={styles.ndaClause}><strong>7. Entire Agreement.</strong>{" "}
-            This Agreement constitutes the entire understanding between the Parties with
-            respect to confidentiality of the subject conversation and supersedes all prior
-            negotiations, representations, warranties, or agreements relating thereto.</p>
-
-          <p style={styles.ndaClause}><strong>8. Electronic Acceptance &amp; Record.</strong>{" "}
-            Acceptance by clicking the button below and entering a typed-name signature
-            constitutes a legally binding electronic signature under the Electronic
-            Signatures in Global and National Commerce Act (E-SIGN, USA), eIDAS
-            Regulation (EU) No 910/2014, and equivalent statutes. Your IP address,
-            device information, email address, typed name, and timestamp will be recorded
-            and a receipt stored as proof of acceptance. Confidential Mode activates
-            only after <strong>both Parties</strong> have individually accepted.</p>
-        </div>
-
-        {/* Signature block */}
-        <div style={styles.signatureBlock}>
-          <label style={styles.checkLabel}>
-            <input
-              type="checkbox"
-              checked={ndaChecked}
-              onChange={(e) => setNdaChecked(e.target.checked)}
-              style={styles.checkbox}
-            />
-            <span>
-              I have read and fully understand the above Agreement and agree to be
-              bound by its terms on behalf of myself.
-            </span>
-          </label>
-          <div style={styles.signatureRow}>
-            <label style={styles.signatureLabel}>
-              Type your full legal name as your electronic signature:
-            </label>
-            <input
-              style={styles.signatureInput}
-              type="text"
-              placeholder="Full Name"
-              value={ndaSignedName}
-              onChange={(e) => setNdaSignedName(e.target.value)}
-              autoComplete="name"
-            />
-            {ndaSignedName.trim() && (
-              <div style={styles.signaturePreview}>{ndaSignedName.trim()}</div>
-            )}
-          </div>
-          {ndaError && <p style={styles.ndaErrorText}>{ndaError}</p>}
-        </div>
-
-        <div style={styles.modalActions}>
-          <button
-            style={styles.btnSecondary}
-            disabled={ndaSubmitting}
-            onClick={() => { setNdaModal(false); setNdaConvId(null); setNdaChecked(false); setNdaSignedName(""); setNdaError(""); }}
-          >
-            Cancel
-          </button>
-          <button
-            style={{
-              ...styles.btnConfidential,
-              opacity: (!ndaChecked || !ndaSignedName.trim() || ndaSubmitting) ? 0.5 : 1,
-              cursor: (!ndaChecked || !ndaSignedName.trim() || ndaSubmitting) ? "not-allowed" : "pointer",
-            }}
-            onClick={acceptNda}
-            disabled={!ndaChecked || !ndaSignedName.trim() || ndaSubmitting}
-          >
-            {ndaSubmitting ? "Recording acceptance…" : "I Accept — Sign & Enable Confidential Mode"}
-          </button>
-        </div>
-        <p style={styles.ndaFootnote}>
-          A timestamped receipt will be generated and stored as proof of your acceptance.
-          Confidential Mode activates once <strong>both parties</strong> have signed.
-        </p>
-      </div>
-    </div>
-  );
 
   return (
     <div style={{ ...styles.appWrap, ...(isMobile ? { flexDirection: "column" } : {}) }}>
@@ -765,7 +606,164 @@ export default function Home() {
           </div>
         </div>
       )}
-      {ndaModal && <NdaModal />}
+      {ndaModal && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modalBox}>
+            <h2 style={styles.modalTitle}>🔒 International Non-Disclosure Agreement</h2>
+
+            {/* Header meta */}
+            <div style={styles.ndaMeta}>
+              <div style={styles.ndaMetaRow}>
+                <span style={styles.ndaMetaLabel}>NDA Version</span>
+                <span style={styles.ndaMetaValue}>2024-01</span>
+              </div>
+              <div style={styles.ndaMetaRow}>
+                <span style={styles.ndaMetaLabel}>Jurisdiction</span>
+                <span style={styles.ndaMetaValue}>International (GDPR · DTSA · UN Convention)</span>
+              </div>
+              <div style={styles.ndaMetaRow}>
+                <span style={styles.ndaMetaLabel}>Effective Date</span>
+                <span style={styles.ndaMetaValue}>{todayStr}</span>
+              </div>
+              <div style={styles.ndaMetaRow}>
+                <span style={styles.ndaMetaLabel}>Party A</span>
+                <span style={styles.ndaMetaValue}>{user?.email}</span>
+              </div>
+              <div style={styles.ndaMetaRow}>
+                <span style={styles.ndaMetaLabel}>Party B</span>
+                <span style={styles.ndaMetaValue}>{otherPartyEmail}</span>
+              </div>
+              <div style={styles.ndaMetaRow}>
+                <span style={styles.ndaMetaLabel}>Conversation</span>
+                <span style={styles.ndaMetaValue}>#{ndaConvId}</span>
+              </div>
+            </div>
+
+            {/* Scrollable terms */}
+            <div style={styles.ndaScroll}>
+              <p style={styles.ndaIntro}>
+                This Non-Disclosure Agreement (<strong>&quot;Agreement&quot;</strong>) is entered
+                into as of <strong>{todayStr}</strong> between the Parties identified above,
+                each a registered user of ConfiMessage, a confidential messaging platform.
+              </p>
+
+              <p style={styles.ndaClause}><strong>1. Scope of Confidentiality.</strong>{" "}
+                All messages, files, attachments, metadata, and any other information exchanged
+                within this conversation (<strong>&quot;Confidential Information&quot;</strong>) once
+                Confidential Mode is activated shall be strictly confidential. Neither Party shall
+                disclose, reproduce, distribute, publish, or otherwise make available any
+                Confidential Information to any third party without the prior written consent
+                of the disclosing Party.</p>
+
+              <p style={styles.ndaClause}><strong>2. Permitted Use.</strong>{" "}
+                Each Party may use Confidential Information solely for the purpose of
+                communicating within this conversation. No licence, express or implied,
+                over any intellectual property right is granted by this Agreement.</p>
+
+              <p style={styles.ndaClause}><strong>3. Exclusions.</strong>{" "}
+                The obligations in §1 do not apply to information that: (a) is or becomes
+                publicly available through no fault of the receiving Party; (b) was rightfully
+                known by the receiving Party before disclosure; (c) is independently developed
+                without use of Confidential Information; or (d) must be disclosed by law,
+                provided the receiving Party gives prompt notice where permitted.</p>
+
+              <p style={styles.ndaClause}><strong>4. Duration.</strong>{" "}
+                This Agreement takes effect on the date of the later Party&apos;s acceptance
+                and remains in force indefinitely unless terminated by written mutual agreement
+                of both Parties.</p>
+
+              <p style={styles.ndaClause}><strong>5. Governing Law &amp; Jurisdiction.</strong>{" "}
+                This Agreement is governed by international treaty obligations and, where
+                applicable, the laws of the jurisdiction most favourable to enforcing
+                confidentiality, including the General Data Protection Regulation (EU) 2016/679,
+                the Defend Trade Secrets Act 18 U.S.C. §1836 (USA), the Trade Secrets
+                Directive (EU) 2016/943, and equivalent statutes in all signatory nations
+                of the UN Convention on Contracts for the International Sale of Goods.
+                The Parties submit to the non-exclusive jurisdiction of the courts most
+                competent to enforce this Agreement.</p>
+
+              <p style={styles.ndaClause}><strong>6. Remedies.</strong>{" "}
+                Both Parties acknowledge that breach may cause irreparable harm for which
+                monetary damages are an inadequate remedy. The non-breaching Party is entitled
+                to seek injunctive or other equitable relief in any court of competent
+                jurisdiction, without the need to post bond, in addition to all other remedies
+                at law or in equity.</p>
+
+              <p style={styles.ndaClause}><strong>7. Entire Agreement.</strong>{" "}
+                This Agreement constitutes the entire understanding between the Parties with
+                respect to confidentiality of the subject conversation and supersedes all prior
+                negotiations, representations, warranties, or agreements relating thereto.</p>
+
+              <p style={styles.ndaClause}><strong>8. Electronic Acceptance &amp; Record.</strong>{" "}
+                Acceptance by clicking the button below and entering a typed-name signature
+                constitutes a legally binding electronic signature under the Electronic
+                Signatures in Global and National Commerce Act (E-SIGN, USA), eIDAS
+                Regulation (EU) No 910/2014, and equivalent statutes. Your IP address,
+                device information, email address, typed name, and timestamp will be recorded
+                and a receipt stored as proof of acceptance. Confidential Mode activates
+                only after <strong>both Parties</strong> have individually accepted.</p>
+            </div>
+
+            {/* Signature block */}
+            <div style={styles.signatureBlock}>
+              <label style={styles.checkLabel}>
+                <input
+                  type="checkbox"
+                  checked={ndaChecked}
+                  onChange={(e) => setNdaChecked(e.target.checked)}
+                  style={styles.checkbox}
+                />
+                <span>
+                  I have read and fully understand the above Agreement and agree to be
+                  bound by its terms on behalf of myself.
+                </span>
+              </label>
+              <div style={styles.signatureRow}>
+                <label style={styles.signatureLabel}>
+                  Type your full legal name as your electronic signature:
+                </label>
+                <input
+                  style={styles.signatureInput}
+                  type="text"
+                  placeholder="Full Name"
+                  value={ndaSignedName}
+                  onChange={(e) => setNdaSignedName(e.target.value)}
+                  autoComplete="name"
+                />
+                {ndaSignedName.trim() && (
+                  <div style={styles.signaturePreview}>{ndaSignedName.trim()}</div>
+                )}
+              </div>
+              {ndaError && <p style={styles.ndaErrorText}>{ndaError}</p>}
+            </div>
+
+            <div style={styles.modalActions}>
+              <button
+                style={styles.btnSecondary}
+                disabled={ndaSubmitting}
+                onClick={() => { setNdaModal(false); setNdaConvId(null); setNdaChecked(false); setNdaSignedName(""); setNdaError(""); }}
+              >
+                Cancel
+              </button>
+              <button
+                style={{
+                  ...styles.btnConfidential,
+                  opacity: (!ndaChecked || !ndaSignedName.trim() || ndaSubmitting) ? 0.5 : 1,
+                  cursor: (!ndaChecked || !ndaSignedName.trim() || ndaSubmitting) ? "not-allowed" : "pointer",
+                }}
+                onClick={acceptNda}
+                disabled={!ndaChecked || !ndaSignedName.trim() || ndaSubmitting}
+              >
+                {ndaSubmitting ? "Recording acceptance…" : "I Accept — Sign & Enable Confidential Mode"}
+              </button>
+            </div>
+            <p style={styles.ndaFootnote}>
+              A timestamped receipt will be generated and stored as proof of your acceptance.
+              Confidential Mode activates once <strong>both parties</strong> have signed.
+            </p>
+          </div>
+        </div>
+      )}
       {/* Sidebar */}
       <div style={sidebarStyle}>
         <div style={styles.sidebarHeader}>

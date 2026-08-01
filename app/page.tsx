@@ -292,11 +292,11 @@ export default function Home() {
     setIsRecording(true);
 
     // Web Speech API for live transcription
-    const SpeechRecognitionImpl =
+    const SpeechRecognition =
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
-    if (SpeechRecognitionImpl) {
-      recognition = new SpeechRecognitionImpl();
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
       recognition.continuous = true;
       recognition.interimResults = true;
       recognition.lang = "en-US";

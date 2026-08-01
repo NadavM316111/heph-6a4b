@@ -629,7 +629,7 @@ export default function Home() {
         </div>
         <div style={styles.meRow}>
           <span style={styles.meEmail}>{myEmail}</span>
-          <button style={styles.logoutBtn} onClick={handleLogout}>Out</button>
+          <button style={styles.logoutBtn} onClick={handleLogout}>Log Out</button>
         </div>
         <div style={styles.convList}>
           {conversations.length === 0 && (

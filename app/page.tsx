@@ -1359,7 +1359,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   voiceContent: { display: "flex", flexDirection: "column" as const, gap: 6, minWidth: 180 },
   voiceIcon: { fontSize: 16 },
-  audioPlayer: { width: "100%", minWidth: 180, maxWidth: 260, accentColor: "#6c63ff" },
+  audioPlayer: { width: "100%", minWidth: 180, maxWidth: 260 },
   transcriptText: {
     margin: 0, fontSize: 12, color: "rgba(255,255,255,0.7)",
     fontStyle: "italic", lineHeight: 1.4,

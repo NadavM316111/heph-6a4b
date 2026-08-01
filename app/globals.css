@@ -39,3 +39,15 @@ button:disabled {
 input::placeholder {
   color: #555;
 }
+
+@media (max-width: 640px) {
+  html, body, #__next, main {
+    height: 100%;
+    overflow: hidden;
+  }
+  /* Prevent iOS bounce on fixed panels */
+  body {
+    position: fixed;
+    width: 100%;
+  }
+}

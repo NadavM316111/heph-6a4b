@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 
 interface User {
   email: string;
@@ -33,7 +33,20 @@ interface Message {
 
 type View = "list" | "chat" | "new";
 
+function useIsMobile() {
+  const [mobile, setMobile] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    setMobile(mq.matches);
+    const handler = (e: MediaQueryListEvent) => setMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  return mobile;
+}
+
 export default function Home() {
+  const isMobile = useIsMobile();
   const [user, setUser] = useState<User | null | undefined>(undefined);
   const [view, setView] = useState<View>("list");
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -364,6 +377,21 @@ export default function Home() {
 
   const myEmail = user?.email || "";
 
+  // On mobile, derive which panel is visible
+  const showSidebar = !isMobile || view === "list" || view === "new";
+  const showMain = !isMobile || view === "chat" || view === "new";
+
+  // Responsive style overrides
+  const sidebarStyle: React.CSSProperties = useMemo(() => ({
+    ...styles.sidebar,
+    ...(isMobile ? { width: "100%", minWidth: 0, borderRight: "none", display: showSidebar ? "flex" : "none" } : {}),
+  }), [isMobile, showSidebar]);
+
+  const mainStyle: React.CSSProperties = useMemo(() => ({
+    ...styles.main,
+    ...(isMobile ? { display: showMain && view !== "list" ? "flex" : view === "list" ? "none" : "flex" } : {}),
+  }), [isMobile, showMain, view]);
+
   if (user === undefined) {
     return (
       <div style={styles.centered}>
@@ -588,10 +616,10 @@ export default function Home() {
   );
 
   return (
-    <div style={styles.appWrap}>
+    <div style={{ ...styles.appWrap, ...(isMobile ? { flexDirection: "column" } : {}) }}>
       {ndaModal && <NdaModal />}
       {/* Sidebar */}
-      <div style={styles.sidebar}>
+      <div style={sidebarStyle}>
         <div style={styles.sidebarHeader}>
           <span style={styles.logoIcon}>🔐</span>
           <span style={styles.sidebarTitle}>ConfiMessage</span>
@@ -612,7 +640,7 @@ export default function Home() {
               key={conv.id}
               style={{
                 ...styles.convItem,
-                ...(activeConv?.id === conv.id ? styles.convItemActive : {}),
+                ...(activeConv?.id === conv.id && !isMobile ? styles.convItemActive : {}),
               }}
               onClick={() => openConversation(conv)}
             >
@@ -639,7 +667,7 @@ export default function Home() {
       </div>
 
       {/* Main panel */}
-      <div style={styles.main}>
+      <div style={mainStyle}>
         {view === "new" && (
           <div style={styles.newConvWrap}>
             <h2 style={styles.newConvTitle}>New Conversation</h2>
@@ -703,7 +731,7 @@ export default function Home() {
           <div style={styles.chatWrap}>
             {/* Chat header */}
             <div style={styles.chatHeader}>
-              <button style={styles.backBtn} onClick={() => { setView("list"); setActiveConv(null); }}>
+              <button style={styles.backBtn} onClick={() => { setView("list"); setActiveConv(null); setMessages([]); }}>
                 ←
               </button>
               <div style={styles.chatAvatar}>
@@ -895,7 +923,7 @@ export default function Home() {
 const styles: Record<string, React.CSSProperties> = {
   centered: {
     display: "flex", alignItems: "center", justifyContent: "center",
-    height: "100vh", background: "#0f1117",
+    height: "100vh", background: "#0f1117", width: "100%",
   },
   spinner: {
     width: 40, height: 40, border: "4px solid #333",
@@ -907,8 +935,9 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: "100vh", background: "#0f1117",
   },
   authCard: {
-    background: "#1a1d27", borderRadius: 16, padding: "40px 36px",
+    background: "#1a1d27", borderRadius: 16, padding: "32px 20px",
     width: "100%", maxWidth: 400, boxShadow: "0 8px 40px rgba(0,0,0,0.5)",
+    margin: "0 12px",
   },
   logoRow: {
     display: "flex", alignItems: "center", gap: 10, marginBottom: 4,
@@ -950,11 +979,12 @@ const styles: Record<string, React.CSSProperties> = {
     cursor: "pointer",
   },
   appWrap: {
-    display: "flex", height: "100vh", background: "#0f1117", overflow: "hidden",
+    display: "flex", height: "100vh", width: "100%", background: "#0f1117", overflow: "hidden",
   },
   sidebar: {
     width: 320, minWidth: 260, background: "#1a1d27",
     display: "flex", flexDirection: "column", borderRight: "1px solid #2e3147",
+    flexShrink: 0,
   },
   sidebarHeader: {
     display: "flex", alignItems: "center", gap: 10,
@@ -1020,9 +1050,9 @@ const styles: Record<string, React.CSSProperties> = {
   newConvForm: { display: "flex", flexDirection: "column", gap: 12, width: "100%", maxWidth: 400 },
   chatWrap: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" },
   chatHeader: {
-    display: "flex", alignItems: "center", gap: 12,
-    padding: "14px 20px", borderBottom: "1px solid #2e3147",
-    background: "#1a1d27",
+    display: "flex", alignItems: "center", gap: 8,
+    padding: "12px 12px", borderBottom: "1px solid #2e3147",
+    background: "#1a1d27", flexWrap: "wrap" as const,
   },
   backBtn: {
     background: "none", border: "none", color: "#6c63ff",
@@ -1124,7 +1154,7 @@ const styles: Record<string, React.CSSProperties> = {
     zIndex: 1000, padding: 16, overflowY: "auto" as const,
   },
   modalBox: {
-    background: "#1a1d27", borderRadius: 16, padding: "28px 24px",
+    background: "#1a1d27", borderRadius: 16, padding: "20px 16px",
     width: "100%", maxWidth: 620, boxShadow: "0 8px 40px rgba(0,0,0,0.7)",
     display: "flex", flexDirection: "column", gap: 14,
     maxHeight: "90vh", overflowY: "auto" as const,

@@ -43,7 +43,37 @@ interface Reaction {
   emoji: string;
 }
 
-type View = "list" | "chat" | "new";
+interface GroupMember {
+  user_email: string;
+  accepted_nda: boolean;
+  nda_signed_name: string | null;
+  nda_accepted_at: string | null;
+  invited_by: string | null;
+}
+
+interface Group {
+  id: number;
+  name: string;
+  creator_email: string;
+  confidential_mode: boolean;
+  confidential_activated_at: string | null;
+  created_at: string;
+  members: GroupMember[];
+  last_message?: string | null;
+  last_message_at?: string | null;
+}
+
+interface GroupMessage {
+  id: number;
+  group_id: number;
+  sender_email: string;
+  body: string;
+  is_encrypted: boolean;
+  deleted_at: string | null;
+  created_at: string;
+}
+
+type View = "list" | "chat" | "new" | "groups" | "new-group" | "group-chat";
 
 function useIsMobile() {
   const [mobile, setMobile] = useState(false);
@@ -157,6 +187,27 @@ export default function Home() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Groups state
+  const [sidebarTab, setSidebarTab] = useState<"dms" | "groups">("dms");
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [activeGroup, setActiveGroup] = useState<Group | null>(null);
+  const [groupMessages, setGroupMessages] = useState<GroupMessage[]>([]);
+  const [groupReactions, setGroupReactions] = useState<Reaction[]>([]);
+  const [groupMsgInput, setGroupMsgInput] = useState("");
+  const [newGroupName, setNewGroupName] = useState("");
+  const [newGroupEmails, setNewGroupEmails] = useState("");
+  const [newGroupError, setNewGroupError] = useState("");
+  const [newGroupLoading, setNewGroupLoading] = useState(false);
+  const [groupSearch, setGroupSearch] = useState("");
+  // Group NDA modal state (reuses ndaChecked/ndaSignedName/ndaError)
+  const [groupNdaModal, setGroupNdaModal] = useState(false);
+  const [groupNdaGroupId, setGroupNdaGroupId] = useState<number | null>(null);
+  const [groupNdaSubmitting, setGroupNdaSubmitting] = useState(false);
+  const groupMessagesEndRef = useRef<HTMLDivElement>(null);
+  const groupPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [groupPickerMsgId, setGroupPickerMsgId] = useState<number | null>(null);
+  const groupPickerRef = useRef<HTMLDivElement>(null);
+
   // Auth check
   useEffect(() => {
     fetch("/api/auth")
@@ -164,6 +215,52 @@ export default function Home() {
       .then((d) => setUser(d.email ? { email: d.email } : null))
       .catch(() => setUser(null));
   }, []);
+
+  // Groups fetch
+  const fetchGroups = useCallback(async () => {
+    if (!user) return;
+    const res = await fetch("/api/groups");
+    if (res.ok) {
+      const data = await res.json();
+      setGroups(data.groups || []);
+    }
+  }, [user]);
+
+  const fetchGroupMessages = useCallback(async (groupId: number) => {
+    const res = await fetch(`/api/group-messages?group_id=${groupId}`);
+    if (res.ok) {
+      const data = await res.json();
+      setGroupMessages(data.messages || []);
+    }
+    const rres = await fetch(`/api/group-reactions?group_id=${groupId}`);
+    if (rres.ok) {
+      const rdata = await rres.json();
+      setGroupReactions(rdata.reactions || []);
+    }
+  }, []);
+
+  const toggleGroupReaction = async (messageId: number, emoji: string) => {
+    if (!activeGroup) return;
+    await fetch("/api/group-reactions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: messageId, group_id: activeGroup.id, emoji }),
+    });
+    setGroupPickerMsgId(null);
+    await fetchGroupMessages(activeGroup.id);
+  };
+
+  // Close group reaction picker on outside click
+  useEffect(() => {
+    if (groupPickerMsgId === null) return;
+    const handler = (e: MouseEvent) => {
+      if (groupPickerRef.current && !groupPickerRef.current.contains(e.target as Node)) {
+        setGroupPickerMsgId(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [groupPickerMsgId]);
 
   const fetchConversations = useCallback(async () => {
     if (!user) return;
@@ -219,6 +316,10 @@ export default function Home() {
     if (user) fetchConversations();
   }, [user, fetchConversations]);
 
+  useEffect(() => {
+    if (user) fetchGroups();
+  }, [user, fetchGroups]);
+
   // Ask for notification permission the first time an incoming message is seen
   useEffect(() => {
     if (!notifAsked && user && messages.some((m) => m.sender_email !== user.email)) {
@@ -228,8 +329,8 @@ export default function Home() {
 
   useEffect(() => {
     if (pollRef.current) clearInterval(pollRef.current);
-    if (view === "list" && user) {
-      pollRef.current = setInterval(fetchConversations, 5000);
+    if ((view === "list" || view === "groups") && user) {
+      pollRef.current = setInterval(() => { fetchConversations(); fetchGroups(); }, 5000);
     } else if (view === "chat" && activeConv) {
       const email = user?.email || "";
       pollRef.current = setInterval(() => fetchMessages(activeConv.id, email), 3000);
@@ -237,7 +338,22 @@ export default function Home() {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
-  }, [view, user, activeConv, fetchConversations, fetchMessages]);
+  }, [view, user, activeConv, fetchConversations, fetchMessages, fetchGroups]);
+
+  // Group messages poll
+  useEffect(() => {
+    if (groupPollRef.current) clearInterval(groupPollRef.current);
+    if (view === "group-chat" && activeGroup) {
+      groupPollRef.current = setInterval(() => fetchGroupMessages(activeGroup.id), 3000);
+    }
+    return () => {
+      if (groupPollRef.current) clearInterval(groupPollRef.current);
+    };
+  }, [view, activeGroup, fetchGroupMessages]);
+
+  useEffect(() => {
+    groupMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [groupMessages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -275,6 +391,9 @@ export default function Home() {
     setView("list");
     setActiveConv(null);
     setConversations([]);
+    setGroups([]);
+    setActiveGroup(null);
+    setGroupMessages([]);
   };
 
   // Reset in-chat search when switching conversations
@@ -587,6 +706,151 @@ export default function Home() {
     }
   };
 
+  const openGroup = async (group: Group) => {
+    setActiveGroup(group);
+    setView("group-chat");
+    setGroupMsgInput("");
+    setGroupPickerMsgId(null);
+    await fetchGroupMessages(group.id);
+  };
+
+  const sendGroupMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!groupMsgInput.trim() || !activeGroup) return;
+    const body = groupMsgInput.trim();
+    setGroupMsgInput("");
+    const res = await fetch("/api/group-messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ group_id: activeGroup.id, body }),
+    });
+    if (res.ok) {
+      await fetchGroupMessages(activeGroup.id);
+      await fetchGroups();
+    }
+  };
+
+  const sendGroupAttachment = async (body: string) => {
+    if (!activeGroup) return;
+    const res = await fetch("/api/group-messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ group_id: activeGroup.id, body }),
+    });
+    if (res.ok) {
+      await fetchGroupMessages(activeGroup.id);
+      await fetchGroups();
+    }
+  };
+
+  const handleGroupFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeGroup) return;
+    e.target.value = "";
+    const fd = new FormData();
+    fd.append("file", file);
+    const uploadRes = await fetch("/api/upload", { method: "POST", body: fd });
+    if (!uploadRes.ok) return;
+    const { url } = await uploadRes.json();
+    const payload = JSON.stringify({ __type: "attachment", url, name: file.name, mime: file.type });
+    await sendGroupAttachment(payload);
+  };
+
+  const createGroup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setNewGroupError("");
+    const name = newGroupName.trim();
+    const emails = newGroupEmails.split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+    if (!name) { setNewGroupError("Group name is required."); return; }
+    if (emails.length === 0) { setNewGroupError("Invite at least one member by email."); return; }
+    setNewGroupLoading(true);
+    const res = await fetch("/api/groups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, invite_emails: emails }),
+    });
+    const d = await res.json();
+    setNewGroupLoading(false);
+    if (!res.ok) { setNewGroupError(d.error || "Could not create group."); return; }
+    setNewGroupName("");
+    setNewGroupEmails("");
+    await fetchGroups();
+    openGroup(d.group as Group);
+  };
+
+  const toggleGroupConfidential = async (group: Group, enable: boolean) => {
+    if (enable) {
+      // Will show NDA modal for the creator first
+      setGroupNdaGroupId(group.id);
+      setNdaChecked(false);
+      setNdaSignedName("");
+      setNdaError("");
+      setGroupNdaModal(true);
+    } else {
+      const res = await fetch("/api/group-members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group_id: group.id, action: "toggle_confidential", enable_confidential: false }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setActiveGroup(d.group);
+        await fetchGroups();
+      }
+    }
+  };
+
+  const acceptGroupNda = async () => {
+    if (!groupNdaGroupId) return;
+    if (!ndaChecked) { setNdaError("You must check the agreement checkbox."); return; }
+    if (!ndaSignedName.trim()) { setNdaError("You must type your full name as your signature."); return; }
+
+    setGroupNdaSubmitting(true);
+    setNdaError("");
+
+    const group = groups.find((g) => g.id === groupNdaGroupId) ?? activeGroup;
+    const isCreatorEnabling = group?.creator_email === myEmail && !group?.confidential_mode;
+
+    // If creator is enabling, first toggle confidential on, then accept NDA
+    if (isCreatorEnabling) {
+      const toggleRes = await fetch("/api/group-members", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ group_id: groupNdaGroupId, action: "toggle_confidential", enable_confidential: true }),
+      });
+      if (!toggleRes.ok) {
+        const d = await toggleRes.json().catch(() => ({}));
+        setNdaError(d.error || "Failed to enable confidential mode.");
+        setGroupNdaSubmitting(false);
+        return;
+      }
+    }
+
+    const res = await fetch("/api/group-members", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ group_id: groupNdaGroupId, action: "accept_nda", signed_name: ndaSignedName.trim() }),
+    });
+
+    setGroupNdaSubmitting(false);
+
+    if (res.ok) {
+      const d = await res.json();
+      setGroupNdaModal(false);
+      setGroupNdaGroupId(null);
+      setNdaChecked(false);
+      setNdaSignedName("");
+      setNdaError("");
+      if (activeGroup && activeGroup.id === groupNdaGroupId) {
+        setActiveGroup(d.group);
+      }
+      await fetchGroups();
+    } else {
+      const d = await res.json().catch(() => ({}));
+      setNdaError(d.error || "Failed to record acceptance. Please try again.");
+    }
+  };
+
   const setAutoDelete = async (conv: Conversation, hours: number | null) => {
     setAutoDeleteSaving(true);
     const res = await fetch("/api/conversations/autodelete", {
@@ -610,6 +874,12 @@ export default function Home() {
     if (!q) return conversations;
     return conversations.filter((c) => c.other_email.toLowerCase().includes(q));
   }, [conversations, convSearch]);
+
+  const filteredGroups = useMemo(() => {
+    const q = groupSearch.trim().toLowerCase();
+    if (!q) return groups;
+    return groups.filter((g) => g.name.toLowerCase().includes(q));
+  }, [groups, groupSearch]);
 
   // In-chat search: collect matching message ids
   const chatMatchIds = useMemo(() => {
@@ -635,8 +905,8 @@ export default function Home() {
   const myEmail = user?.email || "";
 
   // On mobile, derive which panel is visible
-  const showSidebar = !isMobile || view === "list" || view === "new";
-  const showMain = !isMobile || view === "chat" || view === "new";
+  const showSidebar = !isMobile || view === "list" || view === "new" || view === "groups" || view === "new-group";
+  const showMain = !isMobile || view === "chat" || view === "new" || view === "group-chat" || view === "new-group";
 
   // Responsive style overrides
   const sidebarStyle: React.CSSProperties = useMemo(() => ({
@@ -646,7 +916,7 @@ export default function Home() {
 
   const mainStyle: React.CSSProperties = useMemo(() => ({
     ...styles.main,
-    ...(isMobile ? { display: showMain && view !== "list" ? "flex" : view === "list" ? "none" : "flex" } : {}),
+    ...(isMobile ? { display: showMain && view !== "list" && view !== "groups" ? "flex" : (view === "list" || view === "groups") ? "none" : "flex" } : {}),
   }), [isMobile, showMain, view]);
 
   if (user === undefined) {
@@ -713,8 +983,99 @@ export default function Home() {
   const otherPartyEmail = ndaConvForModal?.other_email ?? "the other party";
   const todayStr = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
 
+  // Group NDA modal values
+  const groupNdaGroup = groupNdaGroupId ? (groups.find((g) => g.id === groupNdaGroupId) ?? activeGroup) : activeGroup;
+  const groupNdaMemberCount = groupNdaGroup?.members?.length ?? 0;
+
   return (
     <div style={{ ...styles.appWrap, ...(isMobile ? { flexDirection: "column" } : {}) }}>
+      {/* Group NDA Modal */}
+      {groupNdaModal && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modalBox}>
+            <h2 style={styles.modalTitle}>🔒 Group International NDA</h2>
+            <div style={styles.ndaMeta}>
+              <div style={styles.ndaMetaRow}>
+                <span style={styles.ndaMetaLabel}>Group</span>
+                <span style={styles.ndaMetaValue}>{groupNdaGroup?.name ?? "—"}</span>
+              </div>
+              <div style={styles.ndaMetaRow}>
+                <span style={styles.ndaMetaLabel}>Members</span>
+                <span style={styles.ndaMetaValue}>{groupNdaMemberCount} participants (all must sign)</span>
+              </div>
+              <div style={styles.ndaMetaRow}>
+                <span style={styles.ndaMetaLabel}>Effective Date</span>
+                <span style={styles.ndaMetaValue}>{todayStr}</span>
+              </div>
+              <div style={styles.ndaMetaRow}>
+                <span style={styles.ndaMetaLabel}>Your Email</span>
+                <span style={styles.ndaMetaValue}>{myEmail}</span>
+              </div>
+              <div style={styles.ndaMetaRow}>
+                <span style={styles.ndaMetaLabel}>NDA Version</span>
+                <span style={styles.ndaMetaValue}>2024-01 · International</span>
+              </div>
+            </div>
+            <div style={styles.ndaScroll}>
+              <p style={styles.ndaIntro}>
+                This Non-Disclosure Agreement (<strong>&quot;Agreement&quot;</strong>) is entered into as of{" "}
+                <strong>{todayStr}</strong> among <strong>all members</strong> of the group{" "}
+                <strong>&quot;{groupNdaGroup?.name}&quot;</strong> on ConfiMessage.
+              </p>
+              <p style={styles.ndaClause}><strong>1. Scope of Confidentiality.</strong> All messages, files, and metadata exchanged in this group once Confidential Mode is fully activated (after every member has signed) shall be strictly confidential. No member shall disclose, reproduce, or distribute any Confidential Information to any third party without the prior written consent of all other members.</p>
+              <p style={styles.ndaClause}><strong>2. Activation Requirement.</strong> Confidential Mode for this group activates only after <strong>every member</strong> has individually signed this Agreement. Until then, messages are sent but not marked confidential.</p>
+              <p style={styles.ndaClause}><strong>3. Permitted Use.</strong> Each member may use Confidential Information solely for communication within this group. No licence over any intellectual property is granted.</p>
+              <p style={styles.ndaClause}><strong>4. Exclusions.</strong> Obligations do not apply to information that is publicly available, rightfully known before disclosure, independently developed, or must be disclosed by law.</p>
+              <p style={styles.ndaClause}><strong>5. Duration.</strong> Indefinite from date of your acceptance unless terminated by written mutual agreement of all members.</p>
+              <p style={styles.ndaClause}><strong>5. Governing Law.</strong> Governed by international treaty obligations including GDPR (EU) 2016/679, Defend Trade Secrets Act 18 U.S.C. §1836 (USA), and equivalent UN Convention statutes.</p>
+              <p style={styles.ndaClause}><strong>6. Remedies.</strong> The non-breaching Party is entitled to seek injunctive or other equitable relief in any court of competent jurisdiction.</p>
+              <p style={styles.ndaClause}><strong>7. Electronic Acceptance.</strong> Clicking &quot;I Accept&quot; and entering a typed-name signature constitutes a legally binding electronic signature under E-SIGN (USA), eIDAS (EU), and equivalent statutes.</p>
+            </div>
+            <div style={styles.signatureBlock}>
+              <label style={styles.checkLabel}>
+                <input type="checkbox" checked={ndaChecked} onChange={(e) => setNdaChecked(e.target.checked)} style={styles.checkbox} />
+                <span>I have read and fully understand the above Agreement and agree to be bound by its terms.</span>
+              </label>
+              <div style={styles.signatureRow}>
+                <label style={styles.signatureLabel}>Type your full legal name as your electronic signature:</label>
+                <input
+                  style={styles.signatureInput}
+                  type="text"
+                  placeholder="Full Name"
+                  value={ndaSignedName}
+                  onChange={(e) => setNdaSignedName(e.target.value)}
+                  autoComplete="name"
+                />
+                {ndaSignedName.trim() && <div style={styles.signaturePreview}>{ndaSignedName.trim()}</div>}
+              </div>
+              {ndaError && <p style={styles.ndaErrorText}>{ndaError}</p>}
+            </div>
+            <div style={styles.modalActions}>
+              <button
+                style={styles.btnSecondary}
+                disabled={groupNdaSubmitting}
+                onClick={() => { setGroupNdaModal(false); setGroupNdaGroupId(null); setNdaChecked(false); setNdaSignedName(""); setNdaError(""); }}
+              >
+                Cancel
+              </button>
+              <button
+                style={{
+                  ...styles.btnConfidential,
+                  opacity: (!ndaChecked || !ndaSignedName.trim() || groupNdaSubmitting) ? 0.5 : 1,
+                  cursor: (!ndaChecked || !ndaSignedName.trim() || groupNdaSubmitting) ? "not-allowed" : "pointer",
+                }}
+                onClick={acceptGroupNda}
+                disabled={!ndaChecked || !ndaSignedName.trim() || groupNdaSubmitting}
+              >
+                {groupNdaSubmitting ? "Recording acceptance…" : "I Accept — Sign & Enable Confidential Mode"}
+              </button>
+            </div>
+            <p style={styles.ndaFootnote}>
+              Confidential Mode activates once <strong>all {groupNdaMemberCount} members</strong> have signed.
+            </p>
+          </div>
+        </div>
+      )}
       {/* Attachment lightbox */}
       {attachmentPreview && (
         <div style={styles.modalOverlay} onClick={() => setAttachmentPreview(null)}>
@@ -898,7 +1259,11 @@ export default function Home() {
         <div style={styles.sidebarHeader}>
           <span style={styles.logoIcon}>🔐</span>
           <span style={styles.sidebarTitle}>ConfiMessage</span>
-          <button style={styles.newChatBtn} onClick={() => setView("new")} title="New conversation">
+          <button
+            style={styles.newChatBtn}
+            onClick={() => sidebarTab === "dms" ? setView("new") : setView("new-group")}
+            title={sidebarTab === "dms" ? "New conversation" : "New group"}
+          >
             ✏️
           </button>
         </div>
@@ -906,54 +1271,129 @@ export default function Home() {
           <span style={styles.meEmail}>{myEmail}</span>
           <button style={styles.logoutBtn} onClick={handleLogout}>Log Out</button>
         </div>
-        <div style={styles.convSearchWrap}>
-          <span style={styles.convSearchIcon}>🔍</span>
-          <input
-            style={styles.convSearchInput}
-            type="text"
-            placeholder="Search conversations…"
-            value={convSearch}
-            onChange={(e) => setConvSearch(e.target.value)}
-          />
-          {convSearch && (
-            <button style={styles.convSearchClear} onClick={() => setConvSearch("")}>×</button>
-          )}
+        {/* Sidebar tabs */}
+        <div style={styles.sidebarTabs}>
+          <button
+            style={{ ...styles.sidebarTab, ...(sidebarTab === "dms" ? styles.sidebarTabActive : {}) }}
+            onClick={() => { setSidebarTab("dms"); if (view === "groups" || view === "new-group") setView("list"); }}
+          >
+            💬 DMs
+          </button>
+          <button
+            style={{ ...styles.sidebarTab, ...(sidebarTab === "groups" ? styles.sidebarTabActive : {}) }}
+            onClick={() => { setSidebarTab("groups"); if (view === "list" || view === "new") setView("groups"); }}
+          >
+            👥 Groups
+          </button>
         </div>
-        <div style={styles.convList}>
-          {filteredConversations.length === 0 && (
-            <p style={styles.emptyList}>
-              {convSearch ? "No conversations match." : <>No conversations yet.<br />Click ✏️ to start one.</>}
-            </p>
-          )}
-          {filteredConversations.map((conv) => (
-            <div
-              key={conv.id}
-              style={{
-                ...styles.convItem,
-                ...(activeConv?.id === conv.id && !isMobile ? styles.convItemActive : {}),
-              }}
-              onClick={() => openConversation(conv)}
-            >
-              <div style={styles.convAvatar}>
-                {conv.other_email[0].toUpperCase()}
-              </div>
-              <div style={styles.convInfo}>
-                <div style={styles.convTopRow}>
-                  <span style={styles.convEmail}>{conv.other_email}</span>
-                  {conv.confidential_mode && (
-                    <span style={styles.confiBadge}>🔒 NDA</span>
-                  )}
-                </div>
-                {conv.last_message && (
-                  <span style={styles.convSnippet}>{conv.last_message}</span>
-                )}
-              </div>
-              {(conv.unread_count ?? 0) > 0 && (
-                <span style={styles.unreadBadge}>{conv.unread_count}</span>
+        {sidebarTab === "dms" ? (
+          <>
+            <div style={styles.convSearchWrap}>
+              <span style={styles.convSearchIcon}>🔍</span>
+              <input
+                style={styles.convSearchInput}
+                type="text"
+                placeholder="Search conversations…"
+                value={convSearch}
+                onChange={(e) => setConvSearch(e.target.value)}
+              />
+              {convSearch && (
+                <button style={styles.convSearchClear} onClick={() => setConvSearch("")}>×</button>
               )}
             </div>
-          ))}
-        </div>
+            <div style={styles.convList}>
+              {filteredConversations.length === 0 && (
+                <p style={styles.emptyList}>
+                  {convSearch ? "No conversations match." : <>No conversations yet.<br />Click ✏️ to start one.</>}
+                </p>
+              )}
+              {filteredConversations.map((conv) => (
+                <div
+                  key={conv.id}
+                  style={{
+                    ...styles.convItem,
+                    ...(activeConv?.id === conv.id && !isMobile ? styles.convItemActive : {}),
+                  }}
+                  onClick={() => openConversation(conv)}
+                >
+                  <div style={styles.convAvatar}>
+                    {conv.other_email[0].toUpperCase()}
+                  </div>
+                  <div style={styles.convInfo}>
+                    <div style={styles.convTopRow}>
+                      <span style={styles.convEmail}>{conv.other_email}</span>
+                      {conv.confidential_mode && (
+                        <span style={styles.confiBadge}>🔒 NDA</span>
+                      )}
+                    </div>
+                    {conv.last_message && (
+                      <span style={styles.convSnippet}>{conv.last_message}</span>
+                    )}
+                  </div>
+                  {(conv.unread_count ?? 0) > 0 && (
+                    <span style={styles.unreadBadge}>{conv.unread_count}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={styles.convSearchWrap}>
+              <span style={styles.convSearchIcon}>🔍</span>
+              <input
+                style={styles.convSearchInput}
+                type="text"
+                placeholder="Search groups…"
+                value={groupSearch}
+                onChange={(e) => setGroupSearch(e.target.value)}
+              />
+              {groupSearch && (
+                <button style={styles.convSearchClear} onClick={() => setGroupSearch("")}>×</button>
+              )}
+            </div>
+            <div style={styles.convList}>
+              {filteredGroups.length === 0 && (
+                <p style={styles.emptyList}>
+                  {groupSearch ? "No groups match." : <>No groups yet.<br />Click ✏️ to create one.</>}
+                </p>
+              )}
+              {filteredGroups.map((group) => {
+                const myMember = group.members.find((m) => m.user_email === myEmail);
+                const allSigned = group.members.length > 0 && group.members.every((m) => m.accepted_nda);
+                const pendingNda = group.confidential_mode && !allSigned && myMember && !myMember.accepted_nda;
+                return (
+                  <div
+                    key={group.id}
+                    style={{
+                      ...styles.convItem,
+                      ...(activeGroup?.id === group.id && !isMobile ? styles.convItemActive : {}),
+                    }}
+                    onClick={() => { openGroup(group); setSidebarTab("groups"); }}
+                  >
+                    <div style={{ ...styles.convAvatar, background: "#2a7a4a" }}>
+                      {group.name[0].toUpperCase()}
+                    </div>
+                    <div style={styles.convInfo}>
+                      <div style={styles.convTopRow}>
+                        <span style={styles.convEmail}>{group.name}</span>
+                        {group.confidential_mode && group.confidential_activated_at && (
+                          <span style={styles.confiBadge}>🔒 NDA</span>
+                        )}
+                        {group.confidential_mode && !group.confidential_activated_at && (
+                          <span style={{ ...styles.confiBadge, background: "#2a2a1a", color: "#aaa" }}>⏳ NDA</span>
+                        )}
+                      </div>
+                      <span style={styles.convSnippet}>
+                        {pendingNda ? "⚠️ Your signature required" : (group.last_message ?? `${group.members.length} members`)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Main panel */}
@@ -1006,14 +1446,49 @@ export default function Home() {
           </div>
         )}
 
-        {view === "list" && (
+        {(view === "list" || view === "groups") && (
           <div style={styles.emptyMain}>
             <span style={{ fontSize: 64 }}>🔐</span>
             <h2 style={styles.emptyMainTitle}>Welcome to ConfiMessage</h2>
-            <p style={styles.emptyMainSub}>Select a conversation or start a new one.</p>
-            <button style={styles.btnPrimary} onClick={() => setView("new")}>
-              ✏️ New Conversation
+            <p style={styles.emptyMainSub}>
+              {view === "groups" ? "Select a group or create a new one." : "Select a conversation or start a new one."}
+            </p>
+            <button style={styles.btnPrimary} onClick={() => setView(view === "groups" ? "new-group" : "new")}>
+              ✏️ {view === "groups" ? "New Group" : "New Conversation"}
             </button>
+          </div>
+        )}
+
+        {view === "new-group" && (
+          <div style={styles.newConvWrap}>
+            <h2 style={styles.newConvTitle}>New Group</h2>
+            <p style={styles.newConvSub}>Name your group and invite members by email (comma or space separated).</p>
+            <form onSubmit={createGroup} style={styles.newConvForm}>
+              <input
+                style={styles.input}
+                type="text"
+                placeholder="Group name"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                required
+                autoFocus
+              />
+              <textarea
+                style={{ ...styles.input, minHeight: 80, resize: "vertical" }}
+                placeholder="member1@example.com, member2@example.com"
+                value={newGroupEmails}
+                onChange={(e) => setNewGroupEmails(e.target.value)}
+              />
+              {newGroupError && <p style={styles.errorText}>{newGroupError}</p>}
+              <div style={{ display: "flex", gap: 10 }}>
+                <button style={styles.btnSecondary} type="button" onClick={() => { setView("groups"); setSidebarTab("groups"); }}>
+                  Cancel
+                </button>
+                <button style={styles.btnPrimary} type="submit" disabled={newGroupLoading}>
+                  {newGroupLoading ? "Creating…" : "Create Group"}
+                </button>
+              </div>
+            </form>
           </div>
         )}
 

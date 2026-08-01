@@ -36,6 +36,12 @@ interface Message {
   receipt_status?: "sent" | "delivered" | "read" | "incoming";
 }
 
+interface Reaction {
+  message_id: number;
+  user_email: string;
+  emoji: string;
+}
+
 type View = "list" | "chat" | "new";
 
 function useIsMobile() {
@@ -95,6 +101,44 @@ export default function Home() {
   const chatSearchInputRef = useRef<HTMLInputElement>(null);
   const matchRefs = useRef<(HTMLDivElement | null)[]>([]);
 
+  const [reactions, setReactions] = useState<Reaction[]>([]);
+  const [pickerMsgId, setPickerMsgId] = useState<number | null>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
+
+  const fetchReactions = useCallback(async (convId: number) => {
+    const res = await fetch(`/api/reactions?conversation_id=${convId}`);
+    if (res.ok) {
+      const data = await res.json();
+      setReactions(data.reactions || []);
+    }
+  }, []);
+
+  const toggleReaction = async (messageId: number, emoji: string) => {
+    if (!activeConv) return;
+    await fetch("/api/reactions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message_id: messageId, emoji }),
+    });
+    setPickerMsgId(null);
+    await fetchReactions(activeConv.id);
+  };
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (pickerMsgId === null) return;
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setPickerMsgId(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [pickerMsgId]);
+
   const [ndaModal, setNdaModal] = useState(false);
   const [ndaConvId, setNdaConvId] = useState<number | null>(null);
   const [ndaChecked, setNdaChecked] = useState(false);
@@ -135,6 +179,7 @@ export default function Home() {
       const data = await res.json();
       const fetched: Message[] = data.messages || [];
       setMessages(fetched);
+      await fetchReactions(convId);
 
       // Fire browser notifications for any new incoming messages
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
@@ -228,6 +273,7 @@ export default function Home() {
     setChatSearchOpen(false);
     setChatSearchQuery("");
     setChatSearchMatchIdx(0);
+    setPickerMsgId(null);
     setActiveConv(conv);
     setView("chat");
     lastMsgIdRef.current = 0;
@@ -1154,6 +1200,19 @@ export default function Home() {
                   );
                 };
 
+                // Compute reactions for this message
+                const msgReactions = reactions.filter((r) => r.message_id === msg.id);
+                // Group by emoji: emoji -> { count, iMine }
+                const emojiGroups: Record<string, { count: number; iMine: boolean }> = {};
+                for (const r of msgReactions) {
+                  if (!emojiGroups[r.emoji]) emojiGroups[r.emoji] = { count: 0, iMine: false };
+                  emojiGroups[r.emoji].count += 1;
+                  if (r.user_email === myEmail) emojiGroups[r.emoji].iMine = true;
+                }
+                const emojiEntries = Object.entries(emojiGroups);
+
+                const isPickerOpen = pickerMsgId === msg.id;
+
                 return (
                   <div
                     key={msg.id}
@@ -1162,61 +1221,122 @@ export default function Home() {
                       ...styles.msgRow,
                       justifyContent: isMe ? "flex-end" : "flex-start",
                       ...(isCurrent ? styles.msgRowCurrentMatch : isMatch ? styles.msgRowMatch : {}),
+                      position: "relative",
                     }}
                   >
-                    <div
-                      style={{
-                        ...styles.msgBubble,
-                        ...(isMe ? styles.msgBubbleMe : styles.msgBubbleThem),
-                        ...(msg.is_encrypted ? styles.msgBubbleEncrypted : {}),
-                      }}
-                    >
-                      {msg.is_encrypted && <span style={styles.encryptedIcon}>🔒 </span>}
-                      {parsed?.__type === "attachment" ? (
-                        <div style={styles.attachmentContent}>
-                          {parsed.mime?.startsWith("image/") ? (
-                            <img
-                              src={parsed.url}
-                              alt={parsed.name ?? "image"}
-                              style={styles.attachmentImage}
-                              onClick={() => parsed.url && setAttachmentPreview({ url: parsed.url, name: parsed.name ?? "image", mime: parsed.mime ?? "image/jpeg" })}
-                            />
-                          ) : (
-                            <a href={parsed.url} target="_blank" rel="noreferrer" style={styles.attachmentLink}>
-                              📎 {parsed.name ?? "File"}
-                            </a>
-                          )}
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: isMe ? "flex-end" : "flex-start", maxWidth: "70%", position: "relative" }}>
+                      {/* Reaction picker */}
+                      {isPickerOpen && (
+                        <div
+                          ref={pickerRef}
+                          style={{
+                            ...styles.reactionPicker,
+                            ...(isMe ? { right: 0 } : { left: 0 }),
+                          }}
+                        >
+                          {REACTION_EMOJIS.map((em) => {
+                            const mine = emojiGroups[em]?.iMine ?? false;
+                            return (
+                              <button
+                                key={em}
+                                style={{
+                                  ...styles.reactionPickerBtn,
+                                  ...(mine ? styles.reactionPickerBtnMine : {}),
+                                }}
+                                onClick={() => toggleReaction(msg.id, em)}
+                                title={em}
+                              >
+                                {em}
+                              </button>
+                            );
+                          })}
                         </div>
-                      ) : parsed?.__type === "voice" ? (
-                        <div style={styles.voiceContent}>
-                          <span style={styles.voiceIcon}>🎤</span>
-                          <audio controls src={parsed.url} style={styles.audioPlayer} />
-                          {parsed.transcript && (
-                            <p style={styles.transcriptText}>&ldquo;{highlightText(parsed.transcript)}&rdquo;</p>
-                          )}
-                        </div>
-                      ) : (
-                        <span style={styles.msgBody}>{highlightText(msg.body)}</span>
                       )}
-                      <span style={styles.msgTimeRow}>
-                        <span style={styles.msgTime}>
-                          {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                        </span>
-                        {isMe && (
-                          <span
-                            style={{
-                              ...styles.receiptIcon,
-                              ...(msg.receipt_status === "read" ? styles.receiptRead : {}),
-                              ...(msg.receipt_status === "delivered" ? styles.receiptDelivered : {}),
-                            }}
-                            title={msg.receipt_status ?? "sent"}
-                          >
-                            {msg.receipt_status === "sent"
-                              ? "✓"
-                              : "✓✓"}
-                          </span>
+                      <div
+                        style={{
+                          ...styles.msgBubble,
+                          ...(isMe ? styles.msgBubbleMe : styles.msgBubbleThem),
+                          ...(msg.is_encrypted ? styles.msgBubbleEncrypted : {}),
+                        }}
+                        onClick={() => setPickerMsgId(isPickerOpen ? null : msg.id)}
+                        onContextMenu={(e) => { e.preventDefault(); setPickerMsgId(isPickerOpen ? null : msg.id); }}
+                        onTouchStart={() => {
+                          longPressTimerRef.current = setTimeout(() => {
+                            setPickerMsgId(isPickerOpen ? null : msg.id);
+                          }, 500);
+                        }}
+                        onTouchEnd={() => {
+                          if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                        }}
+                        onTouchMove={() => {
+                          if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                        }}
+                      >
+                        {msg.is_encrypted && <span style={styles.encryptedIcon}>🔒 </span>}
+                        {parsed?.__type === "attachment" ? (
+                          <div style={styles.attachmentContent}>
+                            {parsed.mime?.startsWith("image/") ? (
+                              <img
+                                src={parsed.url}
+                                alt={parsed.name ?? "image"}
+                                style={styles.attachmentImage}
+                                onClick={(e) => { e.stopPropagation(); parsed.url && setAttachmentPreview({ url: parsed.url, name: parsed.name ?? "image", mime: parsed.mime ?? "image/jpeg" }); }}
+                              />
+                            ) : (
+                              <a href={parsed.url} target="_blank" rel="noreferrer" style={styles.attachmentLink} onClick={(e) => e.stopPropagation()}>
+                                📎 {parsed.name ?? "File"}
+                              </a>
+                            )}
+                          </div>
+                        ) : parsed?.__type === "voice" ? (
+                          <div style={styles.voiceContent}>
+                            <span style={styles.voiceIcon}>🎤</span>
+                            <audio controls src={parsed.url} style={styles.audioPlayer} onClick={(e) => e.stopPropagation()} />
+                            {parsed.transcript && (
+                              <p style={styles.transcriptText}>&ldquo;{highlightText(parsed.transcript)}&rdquo;</p>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={styles.msgBody}>{highlightText(msg.body)}</span>
                         )}
-                      </span>
+                        <span style={styles.msgTimeRow}>
+                          <span style={styles.msgTime}>
+                            {new Date(msg.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </span>
+                          {isMe && (
+                            <span
+                              style={{
+                                ...styles.receiptIcon,
+                                ...(msg.receipt_status === "read" ? styles.receiptRead : {}),
+                                ...(msg.receipt_status === "delivered" ? styles.receiptDelivered : {}),
+                              }}
+                              title={msg.receipt_status ?? "sent"}
+                            >
+                              {msg.receipt_status === "sent"
+                                ? "✓"
+                                : "✓✓"}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      {/* Reaction bubbles */}
+                      {emojiEntries.length > 0 && (
+                        <div style={styles.reactionRow}>
+                          {emojiEntries.map(([em, { count, iMine }]) => (
+                            <button
+                              key={em}
+                              style={{
+                                ...styles.reactionBubble,
+                                ...(iMine ? styles.reactionBubbleMine : {}),
+                              }}
+                              onClick={() => toggleReaction(msg.id, em)}
+                              title={iMine ? "Remove reaction" : "React"}
+                            >
+                              {em} <span style={styles.reactionCount}>{count}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -1666,4 +1786,30 @@ const styles: Record<string, React.CSSProperties> = {
   ndaErrorText: { color: "#ff6b6b", fontSize: 13, margin: 0 },
   ndaFootnote: { color: "#555", fontSize: 12, margin: 0, textAlign: "center", lineHeight: 1.5 },
   modalActions: { display: "flex", gap: 12, justifyContent: "flex-end", flexWrap: "wrap" },
+  reactionPicker: {
+    position: "absolute", bottom: "calc(100% + 6px)", zIndex: 100,
+    background: "#23263a", border: "1px solid #3a3d5c", borderRadius: 24,
+    padding: "6px 10px", display: "flex", gap: 4,
+    boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+  },
+  reactionPickerBtn: {
+    background: "none", border: "none", fontSize: 22, cursor: "pointer",
+    padding: "4px 5px", borderRadius: 12, lineHeight: 1, transition: "transform 0.1s",
+  },
+  reactionPickerBtnMine: {
+    background: "rgba(108,99,255,0.25)",
+  },
+  reactionRow: {
+    display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4, paddingLeft: 4,
+  },
+  reactionBubble: {
+    display: "inline-flex", alignItems: "center", gap: 3,
+    background: "#1e2130", border: "1px solid #2e3147",
+    borderRadius: 12, padding: "2px 8px", fontSize: 14,
+    cursor: "pointer", color: "#ccc", lineHeight: 1.4,
+  },
+  reactionBubbleMine: {
+    background: "rgba(108,99,255,0.2)", border: "1px solid #6c63ff", color: "#fff",
+  },
+  reactionCount: { fontSize: 12, color: "#aaa", fontVariantNumeric: "tabular-nums" },
 };

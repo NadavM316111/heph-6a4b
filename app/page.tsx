@@ -513,7 +513,7 @@ export default function Home() {
   const sidebarStyle: React.CSSProperties = useMemo(() => ({
     ...styles.sidebar,
     ...(isMobile ? { width: "100%", minWidth: 0, borderRight: "none", display: showSidebar ? "flex" : "none" } : {}),
-  }), [isMobile, showSidebar, view]);
+  }), [isMobile, showSidebar]);
 
   const mainStyle: React.CSSProperties = useMemo(() => ({
     ...styles.main,

@@ -18,6 +18,7 @@ interface Conversation {
   confidential_activated_at: string | null;
   confidential_accepted_by_a: boolean;
   confidential_accepted_by_b: boolean;
+  auto_delete_hours: number | null;
   created_at: string;
   other_email: string;
   last_message?: string;
@@ -138,6 +139,14 @@ export default function Home() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [pickerMsgId]);
+
+  const [autoDeleteSaving, setAutoDeleteSaving] = useState(false);
+  const AUTO_DELETE_OPTIONS: { label: string; value: number | null }[] = [
+    { label: "Off", value: null },
+    { label: "1 hour", value: 1 },
+    { label: "24 hours", value: 24 },
+    { label: "7 days", value: 168 },
+  ];
 
   const [ndaModal, setNdaModal] = useState(false);
   const [ndaConvId, setNdaConvId] = useState<number | null>(null);
@@ -578,6 +587,23 @@ export default function Home() {
     }
   };
 
+  const setAutoDelete = async (conv: Conversation, hours: number | null) => {
+    setAutoDeleteSaving(true);
+    const res = await fetch("/api/conversations/autodelete", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conversation_id: conv.id, auto_delete_hours: hours }),
+    });
+    setAutoDeleteSaving(false);
+    if (res.ok) {
+      const d = await res.json();
+      if (activeConv && activeConv.id === conv.id) {
+        setActiveConv({ ...activeConv, auto_delete_hours: d.conversation?.auto_delete_hours ?? null });
+      }
+      await fetchConversations();
+    }
+  };
+
   // Filtered conversations for sidebar search
   const filteredConversations = useMemo(() => {
     const q = convSearch.trim().toLowerCase();
@@ -1007,6 +1033,28 @@ export default function Home() {
                   <span style={styles.confiBadgeSmall}>🔒 Confidential (NDA Active)</span>
                 )}
               </div>
+              {/* Auto-delete timer picker — confidential only */}
+              {activeConv.confidential_mode && (
+                <div style={styles.autoDeleteWrap}>
+                  <span style={styles.autoDeleteLabel}>⏱</span>
+                  <select
+                    style={styles.autoDeleteSelect}
+                    value={activeConv.auto_delete_hours ?? ""}
+                    disabled={autoDeleteSaving}
+                    onChange={(e) => {
+                      const v = e.target.value === "" ? null : parseInt(e.target.value, 10);
+                      setAutoDelete(activeConv, v);
+                    }}
+                    title="Auto-delete timer for messages in this confidential conversation"
+                  >
+                    {AUTO_DELETE_OPTIONS.map((opt) => (
+                      <option key={String(opt.value)} value={opt.value ?? ""}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {/* In-chat search toggle */}
               <button
                 style={styles.chatSearchToggleBtn}
@@ -1213,6 +1261,34 @@ export default function Home() {
 
                 const isPickerOpen = pickerMsgId === msg.id;
 
+                // Countdown badge: only when auto_delete_hours is set and confidential
+                let countdownBadge: React.ReactNode = null;
+                if (activeConv.auto_delete_hours && activeConv.confidential_mode) {
+                  const expiresAt = new Date(msg.created_at).getTime() + activeConv.auto_delete_hours * 3600 * 1000;
+                  const remainingMs = expiresAt - Date.now();
+                  if (remainingMs > 0 && remainingMs < activeConv.auto_delete_hours * 3600 * 1000) {
+                    const remainingSec = Math.floor(remainingMs / 1000);
+                    let label = "";
+                    let urgent = false;
+                    if (remainingSec < 3600) {
+                      const m = Math.floor(remainingSec / 60);
+                      const s = remainingSec % 60;
+                      label = m > 0 ? `${m}m ${s}s` : `${s}s`;
+                      urgent = remainingSec < 300; // < 5 min
+                    } else {
+                      const h = Math.floor(remainingSec / 3600);
+                      const m = Math.floor((remainingSec % 3600) / 60);
+                      label = m > 0 ? `${h}h ${m}m` : `${h}h`;
+                      urgent = h < 1;
+                    }
+                    countdownBadge = (
+                      <span style={{ ...styles.countdownBadge, ...(urgent ? styles.countdownBadgeUrgent : {}) }}>
+                        ⏱ {label}
+                      </span>
+                    );
+                  }
+                }
+
                 return (
                   <div
                     key={msg.id}
@@ -1319,6 +1395,12 @@ export default function Home() {
                           )}
                         </span>
                       </div>
+                      {/* Countdown badge */}
+                      {countdownBadge && (
+                        <div style={{ alignSelf: isMe ? "flex-end" : "flex-start", marginTop: 2 }}>
+                          {countdownBadge}
+                        </div>
+                      )}
                       {/* Reaction bubbles */}
                       {emojiEntries.length > 0 && (
                         <div style={styles.reactionRow}>
@@ -1812,4 +1894,21 @@ const styles: Record<string, React.CSSProperties> = {
     background: "rgba(108,99,255,0.2)", border: "1px solid #6c63ff", color: "#fff",
   },
   reactionCount: { fontSize: 12, color: "#aaa", fontVariantNumeric: "tabular-nums" },
+  autoDeleteWrap: {
+    display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
+  },
+  autoDeleteLabel: { fontSize: 15, color: "#888" },
+  autoDeleteSelect: {
+    background: "#12151e", border: "1px solid #2e3147", color: "#ccc",
+    borderRadius: 8, padding: "5px 8px", fontSize: 12, cursor: "pointer", outline: "none",
+  },
+  countdownBadge: {
+    display: "inline-flex", alignItems: "center", gap: 3,
+    background: "#1e2a1e", border: "1px solid #2e4a2e", color: "#7ec87e",
+    borderRadius: 10, padding: "2px 8px", fontSize: 11, fontVariantNumeric: "tabular-nums",
+    fontWeight: 600,
+  },
+  countdownBadgeUrgent: {
+    background: "#2d1515", border: "1px solid #4d2020", color: "#ff9999",
+  },
 };

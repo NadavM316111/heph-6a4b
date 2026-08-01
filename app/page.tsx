@@ -6,6 +6,125 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let recognition: any = null;
 
+// ---------------------------------------------------------------------------
+// AudioPlayer — custom waveform-style voice message player
+// ---------------------------------------------------------------------------
+function AudioPlayer({ src, isMe }: { src: string; isMe: boolean }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const BAR_COUNT = 28;
+
+  const fmt = (s: number) => {
+    if (!isFinite(s)) return "0:00";
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, "0")}`;
+  };
+
+  const toggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const a = audioRef.current;
+    if (!a) return;
+    if (playing) { a.pause(); } else { a.play(); }
+  };
+
+  const seek = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    const a = audioRef.current;
+    if (!a || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    a.currentTime = ratio * duration;
+  };
+
+  const progress = duration > 0 ? currentTime / duration : 0;
+
+  return (
+    <div style={apStyles.wrap}>
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onLoadedMetadata={(e) => { setDuration((e.target as HTMLAudioElement).duration); setLoading(false); }}
+        onTimeUpdate={(e) => setCurrentTime((e.target as HTMLAudioElement).currentTime)}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => { setPlaying(false); setCurrentTime(0); if (audioRef.current) audioRef.current.currentTime = 0; }}
+        style={{ display: "none" }}
+      />
+      {/* Play / Pause button */}
+      <button
+        onClick={toggle}
+        disabled={loading}
+        style={{
+          ...apStyles.playBtn,
+          background: isMe ? "rgba(255,255,255,0.18)" : "rgba(108,99,255,0.22)",
+          opacity: loading ? 0.45 : 1,
+        }}
+        title={playing ? "Pause" : "Play"}
+      >
+        {playing ? "⏸" : "▶"}
+      </button>
+
+      {/* Waveform bars + seek */}
+      <div style={apStyles.waveWrap} onClick={seek} title="Seek">
+        {Array.from({ length: BAR_COUNT }).map((_, i) => {
+          const barFilled = i / BAR_COUNT < progress;
+          // Pseudo-random heights for a natural waveform look (seeded by index)
+          const h = 30 + ((i * 7 + i * i * 3) % 11) * 4;
+          return (
+            <div
+              key={i}
+              style={{
+                ...apStyles.bar,
+                height: h,
+                background: barFilled
+                  ? (isMe ? "#fff" : "#6c63ff")
+                  : (isMe ? "rgba(255,255,255,0.28)" : "rgba(108,99,255,0.28)"),
+                transform: playing && barFilled ? `scaleY(${1 + 0.18 * Math.sin(Date.now() / 120 + i)})` : "scaleY(1)",
+                transition: "background 0.12s",
+              }}
+            />
+          );
+        })}
+      </div>
+
+      {/* Time */}
+      <span style={{ ...apStyles.time, color: isMe ? "rgba(255,255,255,0.75)" : "#888" }}>
+        {fmt(playing || currentTime > 0 ? currentTime : duration)}
+      </span>
+    </div>
+  );
+}
+
+const apStyles: Record<string, React.CSSProperties> = {
+  wrap: {
+    display: "flex", alignItems: "center", gap: 8,
+    minWidth: 200, maxWidth: 280, padding: "6px 4px",
+  },
+  playBtn: {
+    width: 36, height: 36, borderRadius: "50%", border: "none",
+    fontSize: 15, cursor: "pointer", flexShrink: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
+    color: "#fff", transition: "opacity 0.2s",
+  },
+  waveWrap: {
+    flex: 1, display: "flex", alignItems: "center", gap: 2,
+    height: 36, cursor: "pointer", overflow: "hidden",
+  },
+  bar: {
+    width: 3, borderRadius: 2, flexShrink: 0,
+    transformOrigin: "center",
+  },
+  time: {
+    fontSize: 11, fontVariantNumeric: "tabular-nums",
+    flexShrink: 0, minWidth: 30, textAlign: "right",
+  },
+};
+
 interface User {
   email: string;
 }
@@ -1842,7 +1961,7 @@ export default function Home() {
                         ) : parsed?.__type === "voice" ? (
                           <div style={styles.voiceContent}>
                             <span style={styles.voiceIcon}>🎤</span>
-                            <audio controls src={parsed.url} style={styles.audioPlayer} onClick={(e) => e.stopPropagation()} />
+                            <AudioPlayer src={parsed.url ?? ""} isMe={isMe} />
                             {parsed.transcript && (
                               <p style={styles.transcriptText}>&ldquo;{highlightText(parsed.transcript)}&rdquo;</p>
                             )}
@@ -2204,9 +2323,8 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#a0c4ff", fontSize: 13, textDecoration: "none",
     background: "rgba(0,0,0,0.2)", padding: "6px 10px", borderRadius: 8, display: "inline-block",
   },
-  voiceContent: { display: "flex", flexDirection: "column", gap: 6, minWidth: 180 },
+  voiceContent: { display: "flex", flexDirection: "column", gap: 6, minWidth: 200 },
   voiceIcon: { fontSize: 16 },
-  audioPlayer: { width: "100%", minWidth: 180, maxWidth: 260 },
   transcriptText: {
     margin: 0, fontSize: 12, color: "rgba(255,255,255,0.7)",
     fontStyle: "italic", lineHeight: 1.4,

@@ -96,6 +96,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Cannot message yourself" }, { status: 400 });
   }
 
+  // Check that the other user has an account (auth table uses APP_TABLE_PREFIX + "_users")
+  const userCheck = await q(
+    `SELECT 1 FROM ` + P + `_users WHERE email = $1 LIMIT 1`,
+    [otherEmail]
+  );
+  if (userCheck.length === 0) {
+    return NextResponse.json({ error: "No user found with that email." }, { status: 404 });
+  }
+
   // Alphabetical ordering for participant_a / participant_b
   const [pa, pb] = email < otherEmail ? [email, otherEmail] : [otherEmail, email];
 
